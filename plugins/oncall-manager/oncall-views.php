@@ -1,5 +1,5 @@
 <?php
-// oncall-views.php - Complete adaptation of Front-End UI grids, calendars, forms, and trades
+// oncall-views.php - Front-End UI grids, calendars, forms, trades, and complete 365-day custom shift rotation generator
 require_once __DIR__ . '/oncall-models.php';
 
 $pm = PluginManager::getInstance();
@@ -250,7 +250,6 @@ $pm->registerRoute('oncall_trades', function () {
         </div>
     </div>
 
-    <!-- Script to dynamically load slots per user department selection using Ajax routing closures -->
     <script>
     function loadUserSlots(deptId) {
         if (!deptId) return;
@@ -459,7 +458,7 @@ $pm->registerRoute('oncall_overrides', function () {
 
 
 /* =========================================================
- * VIEW 4: DEPARTMENTS & ROTATIONS MANAGER (oncall_departments)
+ * VIEW 4: DEPARTMENTS MANAGER (oncall_departments)
  * ========================================================= */
 $pm->registerRoute('oncall_departments', function () {
     if (!has_permission('oncall_manager_manage_schedules')) {
@@ -470,7 +469,7 @@ $pm->registerRoute('oncall_departments', function () {
     $msg = '';
     $err = '';
 
-    // Handle Department Actions (Create / Save / Generate)
+    // Handle Department Actions (Create, Delete, update_members)
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         validate_csrf();
         $action = $_POST['action'] ?? '';
@@ -486,20 +485,6 @@ $pm->registerRoute('oncall_departments', function () {
                 $selected_users = $_POST['members'] ?? [];
                 oncall_save_department_users($dept_id, $selected_users);
                 $msg = "Department active membership roster updated!";
-            } elseif ($action === 'generate') {
-                $dept_id = (int)$_POST['department_id'];
-                $start_date = $_POST['start_date'];
-
-                // Fetch members
-                $members = oncall_get_department_users($dept_id);
-                $member_ids = array_column($members, 'id');
-
-                if (empty($member_ids)) {
-                    throw new Exception("Cannot generate rotations: No users are currently joined in this department roster.");
-                }
-
-                oncall_generate_365_day_schedule($dept_id, $member_ids, $start_date);
-                $msg = "365-day normal schedule rotation generated successfully!";
             } elseif ($action === 'delete') {
                 $dept_id = (int)$_POST['department_id'];
                 oncall_delete_department($dept_id);
@@ -515,8 +500,8 @@ $pm->registerRoute('oncall_departments', function () {
     ?>
     <div class="row mb-4 text-start">
         <div class="col-md-12">
-            <h2><i class="fa-solid fa-sitemap text-primary me-2"></i>Departments & Rotation Generators</h2>
-            <p class="text-muted">Create NOC or support departments, configure member pools, and auto-generate 365-day schedule calendars.</p>
+            <h2><i class="fa-solid fa-sitemap text-primary me-2"></i>Configure Departments</h2>
+            <p class="text-muted">Create support departments, toggle NOC modes, and manage rotational member roster pools.</p>
         </div>
     </div>
 
@@ -563,9 +548,7 @@ $pm->registerRoute('oncall_departments', function () {
                                             </td>
                                             <td class="text-end">
                                                 <!-- Edit Members Modal trigger -->
-                                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#membersModal<?= $dept['id'] ?>">Roster</button>
-                                                <!-- Auto-Generate Trigger -->
-                                                <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#generateModal<?= $dept['id'] ?>">Gen</button>
+                                                <button type="button" class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#membersModal<?= $dept['id'] ?>">Roster</button>
                                                 <!-- Delete button -->
                                                 <form method="POST" class="d-inline-block" onsubmit="return confirm('Are you sure you want to delete this department?');">
                                                     <?php csrf_field(); ?>
@@ -614,34 +597,6 @@ $pm->registerRoute('oncall_departments', function () {
                                                         <div class="modal-footer">
                                                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                                                             <button type="submit" class="btn btn-primary">Save Roster Pool</button>
-                                                        </div>
-                                                    </form>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- MODAL: Auto-Generate 365 Days -->
-                                        <div class="modal fade" id="generateModal<?= $dept['id'] ?>" tabindex="-1">
-                                            <div class="modal-dialog">
-                                                <div class="modal-content">
-                                                    <div class="modal-header">
-                                                        <h5 class="modal-title">Auto-Generate 365-Day Rotation</h5>
-                                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                                    </div>
-                                                    <form method="POST">
-                                                        <?php csrf_field(); ?>
-                                                        <input type="hidden" name="action" value="generate">
-                                                        <input type="hidden" name="department_id" value="<?= $dept['id'] ?>">
-                                                        <div class="modal-body text-start">
-                                                            <p class="small text-muted">This script automatically generates normal weekly schedule rotations for the next 52 weeks (365 days) based on the current active roster pool. Existing slots will be overridden.</p>
-                                                            <div class="mb-3">
-                                                                <label class="form-label small fw-bold">Roster Start Monday Date</label>
-                                                                <input type="date" name="start_date" class="form-control" required value="<?= date('Y-m-d') ?>">
-                                                            </div>
-                                                        </div>
-                                                        <div class="modal-footer">
-                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                                            <button type="submit" class="btn btn-success"><i class="fa-solid fa-arrows-spin me-1"></i>Generate Rotation Now</button>
                                                         </div>
                                                     </form>
                                                 </div>
@@ -704,7 +659,7 @@ $pm->registerRoute('oncall_telephony', function () {
     $pdb = oncall_get_pdb();
     $tb_comm = $pdb->getTableName('commportal_accounts');
 
-    // Handle submissions (Create, Delete, Manual Sync test)
+    // Handle submissions (Create, Delete)
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         validate_csrf();
         $action = $_POST['action'] ?? '';
@@ -829,6 +784,303 @@ $pm->registerRoute('oncall_telephony', function () {
                 </div>
             </div>
         </div>
+    </div>
+    <?php
+});
+
+
+/* =========================================================
+ * VIEW 6: COMPLETE 365-DAY ROTATION GENERATOR (oncall_generate)
+ * ========================================================= */
+$pm->registerRoute('oncall_generate', function () {
+    if (!has_permission('oncall_manager_manage_schedules')) {
+        echo '<div class="alert alert-danger">Access Denied.</div>';
+        return;
+    }
+
+    $message = '';
+    $error = '';
+    $departments = oncall_get_all_departments();
+
+    // Handle selection of department
+    $dept_id = isset($_REQUEST['department_id']) ? (int)$_REQUEST['department_id'] : null;
+    $dept_users = [];
+    $is_authorized = false;
+
+    if ($dept_id) {
+        if (oncall_can_manage_department($dept_id)) {
+            $is_authorized = true;
+            $dept_users = oncall_get_department_users($dept_id);
+        } else {
+            $error = 'Unauthorized: Only the designated Manager for this department or a Global Administrator can generate its schedule.';
+        }
+    }
+
+    // Handle generation form submission with secure CSRF verification
+    if (isset($_POST['generate'])) {
+        validate_csrf();
+        $start_date = $_POST['start_date'] ?? '';
+        $included_users = $_POST['include_users'] ?? [];
+        $user_orders = $_POST['user_order'] ?? [];
+
+        if (!$is_authorized) {
+            $error = 'Unauthorized action.';
+        } elseif (empty($start_date)) {
+            $error = 'Please select a rotation start date.';
+        } elseif (empty($included_users)) {
+            $error = 'Please select at least one member for the rotation.';
+        } else {
+            // Build sorted array of users based on order
+            $ordered_members = [];
+            foreach ($included_users as $u_id) {
+                $order = isset($user_orders[$u_id]) ? (int)$user_orders[$u_id] : 0;
+                $ordered_members[] = [
+                    'user_id' => (int)$u_id,
+                    'order' => $order
+                ];
+            }
+
+            // Sort by order
+            usort($ordered_members, function($a, $b) {
+                return $a['order'] <=> $b['order'];
+            });
+
+            $final_user_ids = array_column($ordered_members, 'user_id');
+
+            // Parse custom shifts template from input with all the original day options
+            $shifts_template = [];
+            $raw_shifts = $_POST['shift'] ?? [];
+            foreach ($raw_shifts as $s) {
+                if (!empty($s['start_time']) && !empty($s['end_time'])) {
+                    $shifts_template[] = [
+                        'start_day' => (int)$s['start_day'],
+                        'start_time' => $s['start_time'],
+                        'end_day' => (int)$s['end_day'],
+                        'end_time' => $s['end_time'],
+                        'rotation_order' => isset($s['rotation_order']) ? (int)$s['rotation_order'] : 1
+                    ];
+                }
+            }
+
+            try {
+                oncall_generate_365_day_schedule($dept_id, $final_user_ids, $start_date, $shifts_template);
+                $message = "365-day on-call schedule generated successfully! 52 weeks of custom rotation shifts have been created starting from the week of the selected start date.";
+            } catch (Exception $e) {
+                $error = "Failed to generate schedule: " . $e->getMessage();
+            }
+        }
+    }
+    ?>
+    <div class="row mb-4 text-start">
+        <div class="col-md-12">
+            <h1 class="h2"><i class="fa-solid fa-arrows-spin text-primary me-2"></i>Generate On-Call Rotation</h1>
+            <p class="text-muted">Generate a complete, customized 365-day / 52-week 24/7 on-call schedule rotation.</p>
+        </div>
+    </div>
+
+    <?php if ($message): ?>
+        <div class="alert alert-success alert-dismissible fade show text-start" role="alert">
+            <i class="fa-solid fa-circle-check me-2"></i><?= htmlspecialchars($message) ?>
+            <div class="mt-2">
+                <a href="index.php?route=oncall_calendar&department_id=<?= $dept_id ?>" class="btn btn-sm btn-success"><i class="fa-solid fa-calendar me-1"></i> View Calendar</a>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($error): ?>
+        <div class="alert alert-danger alert-dismissible fade show text-start" role="alert">
+            <i class="fa-solid fa-circle-exclamation me-2"></i><?= htmlspecialchars($error) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    <?php endif; ?>
+
+    <div class="row text-start">
+        <!-- Step 1: Select Department -->
+        <div class="col-lg-4">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white fw-bold">
+                    <i class="fa-solid fa-sitemap me-2 text-primary"></i>1. Select Department
+                </div>
+                <div class="card-body">
+                    <form method="GET" action="index.php" id="deptForm">
+                        <input type="hidden" name="route" value="oncall_generate">
+                        <div class="mb-3">
+                            <label for="department_id" class="form-label fw-semibold">Target Department</label>
+                            <select name="department_id" id="department_id" class="form-select form-select-sm" onchange="document.getElementById('deptForm').submit();" required>
+                                <option value="">-- Choose Department --</option>
+                                <?php foreach ($departments as $dept): ?>
+                                    <option value="<?= $dept['id'] ?>" <?= ($dept_id == $dept['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($dept['name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Configure Rotation Details -->
+        <?php if ($dept_id && $is_authorized): ?>
+            <div class="col-lg-8">
+                <div class="card border-primary shadow-sm">
+                    <div class="card-header bg-primary text-white fw-bold">
+                        <i class="fa-solid fa-gears me-2"></i>2. Configure Rotation & Generate
+                    </div>
+                    <div class="card-body">
+                        <?php if (empty($dept_users)): ?>
+                            <div class="text-center p-4">
+                                <h5 class="text-danger">No users assigned to this department!</h5>
+                                <p class="text-muted small">You cannot generate a schedule because there are no users in this department.</p>
+                                <a href="index.php?route=oncall_departments" class="btn btn-sm btn-outline-danger mt-2">
+                                    <i class="fa-solid fa-users me-1"></i> Assign Users to Department
+                                </a>
+                            </div>
+                        <?php else: ?>
+                            <form method="POST">
+                                <?php csrf_field(); ?>
+                                <input type="hidden" name="department_id" value="<?= $dept_id ?>">
+
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label for="start_date" class="form-label fw-semibold small">Rotation Start Week (Monday)</label>
+                                        <input type="date" class="form-control form-control-sm" name="start_date" id="start_date" value="<?= date('Y-m-d') ?>" required>
+                                        <div class="form-text text-muted small">
+                                            The 52-week schedule will align and start from the Monday of the selected date's week.
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="row mb-4">
+                                    <div class="col-md-12">
+                                        <label class="form-label fw-semibold text-primary small"><i class="fa-solid fa-clock me-1"></i>Weekly Shifts Template</label>
+                                        <div class="form-text text-muted small mb-3">Define 1 or more custom shifts per week. Specify which 'Rotation Order' (Offset) each shift template utilizes to allow different or same members to be assigned dynamically across the shifts. Rows with blank times will be ignored.</div>
+
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-bordered align-middle small">
+                                                <thead class="table-light text-muted small">
+                                                    <tr>
+                                                        <th style="width: 22%;">Start Day</th>
+                                                        <th style="width: 20%;">Start Time</th>
+                                                        <th style="width: 4%;"></th>
+                                                        <th style="width: 22%;">End Day</th>
+                                                        <th style="width: 20%;">End Time</th>
+                                                        <th style="width: 12%;">Rotation Order</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php for ($s = 0; $s < 4; $s++): ?>
+                                                        <tr>
+                                                            <td>
+                                                                <select name="shift[<?= $s ?>][start_day]" class="form-select form-select-sm">
+                                                                    <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
+                                                                    <option value="2">Tuesday</option>
+                                                                    <option value="3">Wednesday</option>
+                                                                    <option value="4">Thursday</option>
+                                                                    <option value="5">Friday</option>
+                                                                    <option value="6">Saturday</option>
+                                                                    <option value="7">Sunday</option>
+                                                                </select>
+                                                            </td>
+                                                            <td>
+                                                                <input type="time" name="shift[<?= $s ?>][start_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>" style="min-width: 110px;">
+                                                            </td>
+                                                            <td class="text-center small text-muted">to</td>
+                                                            <td>
+                                                                <select name="shift[<?= $s ?>][end_day]" class="form-select form-select-sm">
+                                                                    <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Monday</option>
+                                                                    <option value="2">Tuesday</option>
+                                                                    <option value="3">Wednesday</option>
+                                                                    <option value="4">Thursday</option>
+                                                                    <option value="5">Friday</option>
+                                                                    <option value="6">Saturday</option>
+                                                                    <option value="7">Sunday</option>
+                                                                </select>
+                                                            </td>
+                                                            <td>
+                                                                <input type="time" name="shift[<?= $s ?>][end_time]" class="form-control form-control-sm" value="<?= $s == 0 ? '17:00' : '' ?>" style="min-width: 110px;">
+                                                            </td>
+                                                            <td>
+                                                                <select name="shift[<?= $s ?>][rotation_order]" class="form-select form-select-sm">
+                                                                    <option value="1" <?= $s == 0 ? 'selected' : '' ?>>Order 1</option>
+                                                                    <option value="2" <?= $s == 1 ? 'selected' : '' ?>>Order 2</option>
+                                                                    <option value="3" <?= $s == 2 ? 'selected' : '' ?>>Order 3</option>
+                                                                    <option value="4" <?= $s == 3 ? 'selected' : '' ?>>Order 4</option>
+                                                                    <option value="5">Order 5</option>
+                                                                </select>
+                                                            </td>
+                                                        </tr>
+                                                    <?php endfor; ?>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <h5 class="h6 fw-bold mb-3">Select Members and Set Rotation Order</h5>
+                                <p class="text-muted small mb-3">
+                                    Check the box for each member that should be part of the on-call pool, and specify their order number (e.g. 1, 2, 3...) to determine who goes first, second, etc.
+                                </p>
+
+                                <div class="table-responsive mb-4">
+                                    <table class="table table-bordered table-hover align-middle small">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th style="width: 10%;">Include?</th>
+                                                <th>Member Name</th>
+                                                <th>Username</th>
+                                                <th style="width: 25%;">Rotation Order</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php
+                                            $idx = 1;
+                                            foreach ($dept_users as $user):
+                                            ?>
+                                                <tr>
+                                                    <td class="text-center">
+                                                        <input class="form-check-input" type="checkbox" name="include_users[]" value="<?= $user['id'] ?>" id="include_<?= $user['id'] ?>" checked>
+                                                    </td>
+                                                    <td>
+                                                        <label class="form-check-label fw-semibold" for="include_<?= $user['id'] ?>">
+                                                            <?= htmlspecialchars($user['display_name'] ?? $user['username']) ?>
+                                                        </label>
+                                                    </td>
+                                                    <td>
+                                                        <code>@<?= htmlspecialchars($user['username']) ?></code>
+                                                    </td>
+                                                    <td>
+                                                        <input type="number" class="form-control form-control-sm" name="user_order[<?= $user['id'] ?>]" value="<?= $idx++ ?>" min="1" step="1" required>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="alert alert-warning small">
+                                    <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                                    <strong>Warning:</strong> Generating a new schedule will overwrite any existing base 365-day schedule slots for this department. Any manual overrides you've defined will still be preserved and applied on top of the new rotation!
+                                </div>
+
+                                <button type="submit" name="generate" class="btn btn-success btn-sm w-100">
+                                    <i class="fa-solid fa-arrows-spin me-2"></i>Generate 365-Day Schedule
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        <?php else: ?>
+            <div class="col-lg-8">
+                <div class="alert alert-light border text-center p-5">
+                    <i class="fa-solid fa-circle-info text-muted mb-3" style="font-size: 2.5rem;"></i>
+                    <h5>Select an Authorized Department</h5>
+                    <p class="text-muted">Please select a department from the panel on the left where you are the designated on-call group manager or an administrator.</p>
+                </div>
+            </div>
+        <?php endif; ?>
     </div>
     <?php
 });

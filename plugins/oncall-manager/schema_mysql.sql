@@ -1,9 +1,6 @@
 -- schema_mysql.sql
 -- On-Call Schedule Manager isolated dynamic schema creation query helpers
 
--- Note: In PluginDatabase execution, all table creations automatically map to the pre-configured plugin prefix!
--- e.g., 'departments' becomes 'plug_oncall_manager_departments'
-
 -- 1. Departments table
 CREATE TABLE IF NOT EXISTS plug_oncall_manager_departments (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -63,15 +60,7 @@ CREATE TABLE IF NOT EXISTS plug_oncall_manager_noc_business_hours (
     end_time TIME NOT NULL
 );
 
--- 7. Department Zabbix Groups table
-CREATE TABLE IF NOT EXISTS plug_oncall_manager_department_zabbix_groups (
-    department_id INT NOT NULL,
-    zabbix_usrgrp_id BIGINT NOT NULL,
-    last_oncall_userid BIGINT DEFAULT NULL,
-    PRIMARY KEY (department_id, zabbix_usrgrp_id)
-);
-
--- 8. CommPortal Telephony Accounts table
+-- 7. CommPortal Telephony Accounts table
 CREATE TABLE IF NOT EXISTS plug_oncall_manager_commportal_accounts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     department_id INT NOT NULL,
@@ -80,4 +69,12 @@ CREATE TABLE IF NOT EXISTS plug_oncall_manager_commportal_accounts (
     ext VARCHAR(20) DEFAULT NULL,
     last_forwarded_phone VARCHAR(50) DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 8. Plugin-Specific Settings table
+CREATE TABLE IF NOT EXISTS plug_oncall_manager_settings (
+    setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

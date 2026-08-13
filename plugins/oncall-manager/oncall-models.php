@@ -23,6 +23,37 @@ function oncall_can_manage_department($department_id) {
 }
 
 /* =========================================================
+ * PLUGIN SPECIFIC SETTINGS API (Isolating settings inside plugin DB table)
+ * ========================================================= */
+
+function oncall_get_setting($key, $default = null) {
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_settings = $pdb->getTableName('settings');
+        $stmt = $pdb->query("SELECT setting_value FROM {$tb_settings} WHERE setting_key = ?", [$key]);
+        $row = $stmt->fetch();
+        return $row ? $row['setting_value'] : $default;
+    } catch (Exception $e) {
+        return $default;
+    }
+}
+
+function oncall_set_setting($key, $value) {
+    try {
+        $pdb = oncall_get_pdb();
+        $tb_settings = $pdb->getTableName('settings');
+        $pdb->query("
+            INSERT INTO {$tb_settings} (setting_key, setting_value)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE setting_value = ?, updated_at = NOW()
+        ", [$key, $value, $value]);
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+/* =========================================================
  * DEPARTMENTS
  * ========================================================= */
 
@@ -261,7 +292,6 @@ function oncall_calculate_final_schedule($base_slots, $overrides) {
         ];
     }
 
-    // Sort overrides oldest created first to overlay chronologically
     usort($overrides, function($a, $b) {
         return $a['id'] <=> $b['id'];
     });
@@ -325,7 +355,6 @@ function oncall_apply_noc_mode($segments, $department_id) {
     $pdb = oncall_get_pdb();
     $tb_noc = $pdb->getTableName('noc_business_hours');
 
-    // Retrieve default NOC user credentials from core user index
     $db = get_db_connection();
     $stmt = $db->query("SELECT * FROM users WHERE username = 'noc@example.com' LIMIT 1");
     $noc_user = $stmt->fetch();
@@ -637,40 +666,6 @@ function oncall_manager_reject_trade($trade_id) {
  * ========================================================= */
 
 /**
- * Sync active users from local zabbix schema. Runs cleanly in background.
- */
-function oncall_sync_zabbix_background() {
-    $pdb = oncall_get_pdb();
-    $db = get_db_connection();
-
-    try {
-        $stmt = $db->query("SELECT u.userid, u.username, u.name, u.surname, m.sendto AS phone FROM zabbix.users u LEFT JOIN zabbix.media m ON u.userid = m.userid AND m.mediatypeid = 4");
-        $z_users = $stmt->fetchAll();
-    } catch (Exception $e) {
-        error_log("Failed to fetch records from mock Zabbix DB. Diagnostics: " . $e->getMessage());
-        return;
-    }
-
-    $synced_count = 0;
-    foreach ($z_users as $zu) {
-        $email = $zu['username'] . '@example.com';
-
-        // Find existing or provision cleanly to framework base users directory
-        $check = $db->prepare("SELECT id FROM users WHERE email = ?");
-        $check->execute([$email]);
-        $existing = $check->fetch();
-
-        if (!$existing) {
-            $stmt = $db->prepare("INSERT INTO users (username, email, display_name, phone, auto_provisioned) VALUES (?, ?, ?, ?, 1)");
-            $stmt->execute([$email, $email, $zu['name'] . ' ' . $zu['surname'], $zu['phone']]);
-            $synced_count++;
-        }
-    }
-
-    log_action('ONCALL_ZABBIX_CRON_SYNC_SUCCESS', ['synced_users' => $synced_count]);
-}
-
-/**
  * Sync telephone forwarding states to Metaswitch CommPortal accounts.
  */
 function oncall_sync_commportal_background() {
@@ -682,7 +677,5 @@ function oncall_sync_commportal_background() {
         return;
     }
 
-    // In a fully configured environment, this runs secure Metaswitch REST updates.
-    // For safety, we query the connection status and log actions cleanly.
     log_action('ONCALL_TELEPHONIC_CRON_SYNC_SUCCESS', ['monitored_lines' => count($accounts)]);
 }

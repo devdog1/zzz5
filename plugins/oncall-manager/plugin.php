@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: On-Call Schedule Manager
-Description: Complete dynamic rotation calendars, manual overrides overrides, shift trades center, metaswitch unconditional call forwarding, and automated zabbix synchronization.
-Version: 1.0.0
+Description: Complete dynamic rotation calendars, rotation generators, manual overrides, shift trades center, and metaswitch call forwarding.
+Version: 1.1.0
 Author: On-Call Developers
 Permissions: view_schedules, manage_schedules, manage_telephony
 */
@@ -34,6 +34,12 @@ PluginManager::getInstance()->addFilter('theme_nav_links', function ($links) {
         'label' => 'Overrides List',
         'icon'  => 'fa-solid fa-clock-rotate-left',
         'permission' => 'oncall_manager_view_schedules'
+    ];
+    $links[] = [
+        'route' => 'oncall_generate',
+        'label' => 'Generate Rotation',
+        'icon'  => 'fa-solid fa-arrows-spin',
+        'permission' => 'oncall_manager_manage_schedules'
     ];
     $links[] = [
         'route' => 'oncall_departments',
@@ -92,16 +98,8 @@ PluginManager::getInstance()->addAction('index_dashboard_widgets', function ($us
     }
 });
 
-// 3. Register background Cron Task syncs (Zabbix sync and Telephone Forward sync running once per hour)
+// 3. Register background Cron Task syncs (Telephone Forward sync running once per hour, removed Zabbix)
 require_once __DIR__ . '/../../Scheduler.php';
-
-// Zabbix Group sync callback task
-Scheduler::getInstance()->registerTask(
-    'zabbix_roster_sync',
-    'oncall_sync_zabbix_background',
-    3600, // hourly
-    'oncall-manager'
-);
 
 // Telephony forward sync callback task
 Scheduler::getInstance()->registerTask(
@@ -181,15 +179,7 @@ PluginManager::getInstance()->addAction('activate_plugin_oncall-manager', functi
         $db->exec("INSERT IGNORE INTO {$tb_noc} (day_of_week, start_time, end_time) VALUES ({$i}, '08:00:00', '18:00:00')");
     }
 
-    // 7. Create Department Zabbix Groups table
-    $pdb->createTable('department_zabbix_groups', "
-        department_id INT NOT NULL,
-        zabbix_usrgrp_id BIGINT NOT NULL,
-        last_oncall_userid BIGINT DEFAULT NULL,
-        PRIMARY KEY (department_id, zabbix_usrgrp_id)
-    ");
-
-    // 8. Create CommPortal accounts table
+    // 7. Create CommPortal accounts table
     $pdb->createTable('commportal_accounts', "
         id INT AUTO_INCREMENT PRIMARY KEY,
         department_id INT NOT NULL,
@@ -200,16 +190,17 @@ PluginManager::getInstance()->addAction('activate_plugin_oncall-manager', functi
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ");
 
-    // Create a mock Zabbix users table for test synchronizations if not exists
-    $db->exec("CREATE DATABASE IF NOT EXISTS zabbix;");
-    $db->exec("USE zabbix;");
-    $db->exec("CREATE TABLE IF NOT EXISTS users (userid BIGINT PRIMARY KEY, username VARCHAR(100), name VARCHAR(100), surname VARCHAR(100));");
-    $db->exec("CREATE TABLE IF NOT EXISTS media (mediaid BIGINT AUTO_INCREMENT PRIMARY KEY, userid BIGINT, mediatypeid BIGINT, sendto VARCHAR(100));");
-    $db->exec("INSERT IGNORE INTO users VALUES (1, 'alice', 'Alice', 'Smith'), (2, 'bob', 'Bob', 'Jones');");
-    $db->exec("INSERT IGNORE INTO media (userid, mediatypeid, sendto) VALUES (1, 4, '+1-555-0101'), (2, 4, '+1-555-0102');");
+    // 8. Create Plugin-Specific Settings table
+    $pdb->createTable('settings', "
+        setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ");
 
-    // Switch back to framework database
-    $db->exec("USE base_framework;");
+    // Seed Plugin specific Settings
+    $tb_settings = $pdb->getTableName('settings');
+    $db->exec("INSERT IGNORE INTO {$tb_settings} (setting_key, setting_value) VALUES ('commportal_base_url', 'https://endpoint/')");
 
     log_action('ON_CALL_MANAGER_ACTIVATION_SUCCESS', []);
 });
@@ -217,8 +208,8 @@ PluginManager::getInstance()->addAction('activate_plugin_oncall-manager', functi
 // 5. Register Deactivation Hook (Drops dynamic tables safely)
 PluginManager::getInstance()->addAction('deactivate_plugin_oncall-manager', function () {
     $pdb = new PluginDatabase('oncall-manager');
+    $pdb->dropTable('settings');
     $pdb->dropTable('commportal_accounts');
-    $pdb->dropTable('department_zabbix_groups');
     $pdb->dropTable('noc_business_hours');
     $pdb->dropTable('trade_requests');
     $pdb->dropTable('overrides');
@@ -229,5 +220,5 @@ PluginManager::getInstance()->addAction('deactivate_plugin_oncall-manager', func
     log_action('ON_CALL_MANAGER_DEACTIVATION_SUCCESS', []);
 });
 
-// 6. Register Views and Page Routes (Adapt original zzz4 Views)
+// 6. Register Views and Page Routes
 require_once __DIR__ . '/oncall-views.php';
