@@ -1,10 +1,11 @@
 <?php
 /*
 Plugin Name: Sample Manager
-Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, widgets, dynamic table creation, and shared inter-plugin services inside the Base Framework.
-Version: 1.5.0
+Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, widgets, dynamic table creation, custom Roles, and shared inter-plugin services inside the Base Framework.
+Version: 1.6.0
 Author: Framework Developers
 Permissions: manage_sample_settings, view_sample_stats
+Roles: analyst:view_sample_stats; specialist:manage_sample_settings,view_sample_stats
 */
 
 // Prevent direct access

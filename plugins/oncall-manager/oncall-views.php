@@ -19,8 +19,13 @@ $pm->registerRoute('oncall_calendar', function () {
     // Dynamic JSON feed callback for FullCalendar AJAX calls
     if (isset($_GET['ajax_events'])) {
         header('Content-Type: application/json');
-        $start = $_GET['start'] ?? date('Y-m-d H:i:s', time() - 30 * 86400);
-        $end = $_GET['end'] ?? date('Y-m-d H:i:s', time() + 30 * 86400);
+
+        // Securely parse ISO 8601 dates sent by FullCalendar to MySQL Y-m-d H:i:s DATETIME format
+        $start_raw = $_GET['start'] ?? '';
+        $end_raw = $_GET['end'] ?? '';
+
+        $start = !empty($start_raw) ? date('Y-m-d H:i:s', strtotime($start_raw)) : date('Y-m-d H:i:s', time() - 30 * 86400);
+        $end = !empty($end_raw) ? date('Y-m-d H:i:s', strtotime($end_raw)) : date('Y-m-d H:i:s', time() + 30 * 86400);
 
         $segments = oncall_get_final_schedule_for_department($current_dept_id, $start, $end);
         $fc_events = [];
@@ -250,6 +255,7 @@ $pm->registerRoute('oncall_trades', function () {
         </div>
     </div>
 
+    <!-- Script to dynamically load slots per user department selection using Ajax routing closures -->
     <script>
     function loadUserSlots(deptId) {
         if (!deptId) return;
@@ -1081,6 +1087,212 @@ $pm->registerRoute('oncall_generate', function () {
                 </div>
             </div>
         <?php endif; ?>
+    </div>
+    <?php
+});
+
+
+/* =========================================================
+ * VIEW 7: ON-CALL SETTINGS & NOC BUSINESS HOURS (oncall_settings)
+ * ========================================================= */
+$pm->registerRoute('oncall_settings', function () {
+    if (!has_permission('oncall_manager_view_schedules')) {
+        echo '<div class="alert alert-danger">Access Denied.</div>';
+        return;
+    }
+
+    $msg = '';
+    $err = '';
+    $pdb = oncall_get_pdb();
+    $tb_noc = $pdb->getTableName('noc_business_hours');
+    $tb_depts = $pdb->getTableName('departments');
+
+    // Handle submissions (Save NOC business hours, Save CommPortal base URL, Toggle Dept NOC mode)
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        validate_csrf();
+        $action = $_POST['action'] ?? '';
+
+        try {
+            if ($action === 'save_noc_hours') {
+                $raw_hours = $_POST['noc'] ?? [];
+                foreach ($raw_hours as $day => $h) {
+                    $pdb->query("
+                        INSERT INTO {$tb_noc} (day_of_week, start_time, end_time)
+                        VALUES (?, ?, ?)
+                        ON DUPLICATE KEY UPDATE start_time = ?, end_time = ?
+                    ", [(int)$day, $h['start_time'], $h['end_time'], $h['start_time'], $h['end_time']]);
+                }
+                $msg = "NOC active business hours updated successfully!";
+                log_action('ONCALL_SAVE_NOC_HOURS', []);
+            } elseif ($action === 'save_commportal_url') {
+                if (!has_permission('oncall_manager_manage_telephony')) {
+                    throw new Exception("Unauthorized to change CommPortal gateway URLs.");
+                }
+                $url = trim($_POST['commportal_base_url'] ?? '');
+                oncall_set_setting('commportal_base_url', $url);
+                $msg = "CommPortal REST base gateway URL saved successfully!";
+                log_action('ONCALL_SAVE_COMMPORTAL_URL', ['url' => $url]);
+            } elseif ($action === 'toggle_noc_mode') {
+                $dept_id = (int)$_POST['department_id'];
+                $noc_val = (int)($_POST['noc_mode'] ?? 0);
+
+                if (oncall_can_manage_department($dept_id)) {
+                    $pdb->query("UPDATE {$tb_depts} SET noc_mode = ? WHERE id = ?", [$noc_val, $dept_id]);
+                    $msg = "Dynamic NOC Mode toggled successfully!";
+                    log_action('ONCALL_TOGGLE_NOC_MODE', ['dept_id' => $dept_id, 'noc_mode' => $noc_val]);
+                } else {
+                    throw new Exception("Unauthorized: You are not the manager for this department.");
+                }
+            }
+        } catch (Exception $e) {
+            $err = $e->getMessage();
+        }
+    }
+
+    $noc_hours = $pdb->query("SELECT * FROM {$tb_noc} ORDER BY day_of_week ASC")->fetchAll();
+    $departments = oncall_get_all_departments();
+    $comm_url = oncall_get_setting('commportal_base_url', 'https://endpoint/');
+    $days_map = [
+        1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday',
+        4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 7 => 'Sunday'
+    ];
+    ?>
+    <div class="row mb-4 text-start">
+        <div class="col-md-12">
+            <h2><i class="fa-solid fa-gears text-secondary me-2"></i>On-Call Settings & NOC Overlays</h2>
+            <p class="text-muted">Manage global telephony configurations, configure NOC overlay business hours, and toggle active NOC modes.</p>
+        </div>
+    </div>
+
+    <?php if ($msg): ?>
+        <div class="alert alert-success alert-dismissible fade show text-start"><i class="fa-solid fa-circle-check me-1"></i> <?= $msg ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+    <?php endif; ?>
+    <?php if ($err): ?>
+        <div class="alert alert-danger alert-dismissible fade show text-start"><i class="fa-solid fa-circle-exclamation me-1"></i> <?= $err ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+    <?php endif; ?>
+
+    <div class="row text-start">
+        <!-- NOC Business Hours Settings -->
+        <div class="col-lg-6">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-dark text-white"><i class="fa-solid fa-business-time me-1"></i>Configure NOC Business Hours</div>
+                <div class="card-body">
+                    <form method="POST">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="save_noc_hours">
+
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered align-middle small mb-3">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Day of Week</th>
+                                        <th>NOC Shift Start</th>
+                                        <th>NOC Shift End</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php for ($d = 1; $d <= 7; $d++):
+                                        $saved_start = '08:00:00';
+                                        $saved_end = '18:00:00';
+                                        foreach ($noc_hours as $nh) {
+                                            if ($nh['day_of_week'] == $d) {
+                                                $saved_start = $nh['start_time'];
+                                                $saved_end = $nh['end_time'];
+                                                break;
+                                            }
+                                        }
+                                    ?>
+                                        <tr>
+                                            <td><strong><?= $days_map[$d] ?></strong></td>
+                                            <td>
+                                                <input type="time" name="noc[<?= $d ?>][start_time]" class="form-control form-control-sm" value="<?= htmlspecialchars($saved_start) ?>" required>
+                                            </td>
+                                            <td>
+                                                <input type="time" name="noc[<?= $d ?>][end_time]" class="form-control form-control-sm" value="<?= htmlspecialchars($saved_end) ?>" required>
+                                            </td>
+                                        </tr>
+                                    <?php endfor; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="submit" class="btn btn-sm btn-primary w-100"><i class="fa-solid fa-save me-1"></i>Save NOC Shift Hours</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Telephony Base URL & Toggle NOC Modes -->
+        <div class="col-lg-6">
+            <!-- Telephony base URL -->
+            <?php if (has_permission('oncall_manager_manage_telephony')): ?>
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-dark text-white"><i class="fa-solid fa-phone me-1"></i>Metaswitch REST Configuration</div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <?php csrf_field(); ?>
+                            <input type="hidden" name="action" value="save_commportal_url">
+                            <div class="mb-3">
+                                <label class="form-label small fw-bold">CommPortal Base Gateway URL</label>
+                                <input type="url" name="commportal_base_url" class="form-control form-control-sm" value="<?= htmlspecialchars($comm_url) ?>" required>
+                                <div class="form-text">Endpoint used to authorize and direct standard unconditionally forwarded directory lines.</div>
+                            </div>
+                            <button type="submit" class="btn btn-sm btn-success w-100"><i class="fa-solid fa-save me-1"></i>Save Telephony Endpoint</button>
+                        </form>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- Manage Department NOC Modes -->
+            <div class="card shadow-sm">
+                <div class="card-header bg-dark text-white"><i class="fa-solid fa-shield-halved me-1"></i>Toggle Department NOC Mode</div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 small">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Department Name</th>
+                                    <th>NOC Status</th>
+                                    <th class="text-end">Toggle Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($departments as $dept):
+                                    $can_toggle = oncall_can_manage_department($dept['id']);
+                                ?>
+                                    <tr>
+                                        <td><strong><?= htmlspecialchars($dept['name']) ?></strong></td>
+                                        <td>
+                                            <?php if ($dept['noc_mode']): ?>
+                                                <span class="badge bg-info text-dark">NOC Overlay Enabled</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-secondary">Standard 24/7 Rotation</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="text-end">
+                                            <?php if ($can_toggle): ?>
+                                                <form method="POST" class="m-0">
+                                                    <?php csrf_field(); ?>
+                                                    <input type="hidden" name="action" value="toggle_noc_mode">
+                                                    <input type="hidden" name="department_id" value="<?= $dept['id'] ?>">
+                                                    <input type="hidden" name="noc_mode" value="<?= $dept['noc_mode'] ? 0 : 1 ?>">
+                                                    <?php if ($dept['noc_mode']): ?>
+                                                        <button type="submit" class="btn btn-xs btn-outline-danger btn-sm">Disable NOC Mode</button>
+                                                    <?php else: ?>
+                                                        <button type="submit" class="btn btn-xs btn-outline-success btn-sm">Enable NOC Mode</button>
+                                                    <?php endif; ?>
+                                                </form>
+                                            <?php else: ?>
+                                                <span class="text-muted small">No Permission</span>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <?php
 });

@@ -5,6 +5,7 @@ Description: Complete dynamic rotation calendars, rotation generators, manual ov
 Version: 1.1.0
 Author: On-Call Developers
 Permissions: view_schedules, manage_schedules, manage_telephony
+Roles: manager:view_schedules,manage_schedules; agent:view_schedules
 */
 
 // Prevent direct access
@@ -15,43 +16,56 @@ if (!class_exists('PluginManager')) {
 // Load underlying models / operations
 require_once __DIR__ . '/oncall-models.php';
 
-// 1. Register navigation menu items dynamically with dynamic permission constraints
+// 1. Register nested menu navigation bar dropdown dynamically
 PluginManager::getInstance()->addFilter('theme_nav_links', function ($links) {
     $links[] = [
-        'route' => 'oncall_calendar',
-        'label' => 'On-Call Calendar',
-        'icon'  => 'fa-solid fa-calendar-days',
-        'permission' => 'oncall_manager_view_schedules'
-    ];
-    $links[] = [
-        'route' => 'oncall_trades',
-        'label' => 'Shift Trades',
-        'icon'  => 'fa-solid fa-right-left',
-        'permission' => 'oncall_manager_view_schedules'
-    ];
-    $links[] = [
-        'route' => 'oncall_overrides',
-        'label' => 'Overrides List',
-        'icon'  => 'fa-solid fa-clock-rotate-left',
-        'permission' => 'oncall_manager_view_schedules'
-    ];
-    $links[] = [
-        'route' => 'oncall_generate',
-        'label' => 'Generate Rotation',
-        'icon'  => 'fa-solid fa-arrows-spin',
-        'permission' => 'oncall_manager_manage_schedules'
-    ];
-    $links[] = [
-        'route' => 'oncall_departments',
-        'label' => 'Manage Depts',
-        'icon'  => 'fa-solid fa-sitemap',
-        'permission' => 'oncall_manager_manage_schedules'
-    ];
-    $links[] = [
-        'route' => 'oncall_telephony',
-        'label' => 'Telephony Forwarding',
-        'icon'  => 'fa-solid fa-phone-volume',
-        'permission' => 'oncall_manager_manage_telephony'
+        'label' => 'On-Call Manager',
+        'icon'  => 'fa-solid fa-business-time text-info',
+        'permission' => 'oncall_manager_view_schedules',
+        'children' => [
+            [
+                'route' => 'oncall_calendar',
+                'label' => 'Interactive Calendar',
+                'icon'  => 'fa-solid fa-calendar-days',
+                'permission' => 'oncall_manager_view_schedules'
+            ],
+            [
+                'route' => 'oncall_trades',
+                'label' => 'Shift Trades Center',
+                'icon'  => 'fa-solid fa-right-left',
+                'permission' => 'oncall_manager_view_schedules'
+            ],
+            [
+                'route' => 'oncall_overrides',
+                'label' => 'Manual Overrides',
+                'icon'  => 'fa-solid fa-clock-rotate-left',
+                'permission' => 'oncall_manager_view_schedules'
+            ],
+            [
+                'route' => 'oncall_generate',
+                'label' => 'Generate Rotation',
+                'icon'  => 'fa-solid fa-arrows-spin',
+                'permission' => 'oncall_manager_manage_schedules'
+            ],
+            [
+                'route' => 'oncall_settings',
+                'label' => 'NOC Shift & Settings',
+                'icon'  => 'fa-solid fa-gears',
+                'permission' => 'oncall_manager_view_schedules'
+            ],
+            [
+                'route' => 'oncall_departments',
+                'label' => 'Manage Departments',
+                'icon'  => 'fa-solid fa-sitemap',
+                'permission' => 'oncall_manager_manage_schedules'
+            ],
+            [
+                'route' => 'oncall_telephony',
+                'label' => 'Telephony Sync',
+                'icon'  => 'fa-solid fa-phone-volume',
+                'permission' => 'oncall_manager_manage_telephony'
+            ]
+        ]
     ];
     return $links;
 });

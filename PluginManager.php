@@ -232,7 +232,8 @@ class PluginManager
             'description' => 'No description provided.',
             'version' => '1.0.0',
             'author' => 'Anonymous',
-            'permissions' => ''
+            'permissions' => '',
+            'roles' => ''
         ];
 
         if (preg_match('/Plugin Name:\s*(.*)$/mi', $content, $matches)) {
@@ -247,9 +248,11 @@ class PluginManager
         if (preg_match('/Author:\s*(.*)$/mi', $content, $matches)) {
             $meta['author'] = trim($matches[1]);
         }
-        // Extract optional comma-separated list of custom permissions from headers
         if (preg_match('/Permissions:\s*(.*)$/mi', $content, $matches)) {
             $meta['permissions'] = trim($matches[1]);
+        }
+        if (preg_match('/Roles:\s*(.*)$/mi', $content, $matches)) {
+            $meta['roles'] = trim($matches[1]);
         }
 
         return $meta;
@@ -276,36 +279,79 @@ class PluginManager
             }
 
             $meta = $this->parsePluginHeader($pluginFile);
+            $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
+            $required_prefix = $clean_slug . '_';
 
-            // Dynamically load, validate, prefix, and register permissions to DB
+            // 1. Dynamically load, validate, prefix, and register permissions to DB
+            $provisioned_perms = [];
             if (!empty($meta['permissions'])) {
                 $perm_list = array_map('trim', explode(',', $meta['permissions']));
-
-                // Enforce that permissions must be uniquely prefixed with the plugin slug
-                $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
-                $required_prefix = $clean_slug . '_';
 
                 foreach ($perm_list as $perm_raw) {
                     $clean_perm = preg_replace('/[^a-zA-Z0-9_]/', '', $perm_raw);
 
-                    // Enforce prefixing permission names with the plugin name
                     if (strpos($clean_perm, $required_prefix) !== 0) {
                         $clean_perm = $required_prefix . $clean_perm;
                     }
 
-                    // Enforce that active plugins CANNOT share/conflict a permission name
+                    // Enforce permission uniqueness
                     $check_stmt = $db->prepare("SELECT id FROM permissions WHERE permission_name = ?");
                     $check_stmt->execute([$clean_perm]);
-                    $exists = $check_stmt->fetch();
-
-                    if ($exists) {
-                        // Conflict found! Abort enablement
-                        throw new Exception("Security Conflict: The permission name '{$clean_perm}' is already registered in the system.");
+                    if ($check_stmt->fetch()) {
+                        throw new Exception("Security Conflict: The permission name '{$clean_perm}' is already registered.");
                     }
 
-                    // Insert custom permission dynamically to database
                     $insert_stmt = $db->prepare("INSERT INTO permissions (permission_name, description) VALUES (?, ?)");
                     $insert_stmt->execute([$clean_perm, "Dynamic permission registered by plugin: " . $meta['name']]);
+                    $provisioned_perms[$perm_raw] = $db->lastInsertId();
+                    $provisioned_perms[$clean_perm] = $db->lastInsertId();
+                }
+            }
+
+            // 2. Dynamically load, prefix, and register custom Roles and assign their permissions
+            if (!empty($meta['roles'])) {
+                // Format example: role_name:perm1,perm2; role_name2:perm3
+                $roles_list = array_map('trim', explode(';', $meta['roles']));
+
+                foreach ($roles_list as $role_expr) {
+                    if (strpos($role_expr, ':') === false) continue;
+                    list($role_raw, $role_perms_raw) = explode(':', $role_expr, 2);
+
+                    $role_raw = trim($role_raw);
+                    $clean_role = preg_replace('/[^a-zA-Z0-9_]/', '', $role_raw);
+                    if (strpos($clean_role, $required_prefix) !== 0) {
+                        $clean_role = $required_prefix . $clean_role;
+                    }
+
+                    // Enforce role uniqueness
+                    $check_stmt = $db->prepare("SELECT id FROM roles WHERE role_name = ?");
+                    $check_stmt->execute([$clean_role]);
+                    if ($check_stmt->fetch()) {
+                        throw new Exception("Security Conflict: The role name '{$clean_role}' is already registered.");
+                    }
+
+                    // Insert role
+                    $insert_stmt = $db->prepare("INSERT INTO roles (role_name, description) VALUES (?, ?)");
+                    $insert_stmt->execute([$clean_role, "Dynamic role registered by plugin: " . $meta['name']]);
+                    $role_id = $db->lastInsertId();
+
+                    // Assign listed permissions to this role
+                    $role_perms = array_map('trim', explode(',', $role_perms_raw));
+                    foreach ($role_perms as $rp) {
+                        $full_rp_name = preg_replace('/[^a-zA-Z0-9_]/', '', $rp);
+                        if (strpos($full_rp_name, $required_prefix) !== 0) {
+                            $full_rp_name = $required_prefix . $full_rp_name;
+                        }
+
+                        // Retrieve the permission ID
+                        $stmt_p = $db->prepare("SELECT id FROM permissions WHERE permission_name = ?");
+                        $stmt_p->execute([$full_rp_name]);
+                        $p_row = $stmt_p->fetch();
+                        if ($p_row) {
+                            $stmt_link = $db->prepare("INSERT IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)");
+                            $stmt_link->execute([$role_id, $p_row['id']]);
+                        }
+                    }
                 }
             }
 
@@ -316,9 +362,7 @@ class PluginManager
             $db->commit();
             $this->activePlugins[] = $slug;
 
-            // CRITICAL FIX: Dynamically require the plugin file BEFORE triggering the activation action hook.
-            // This ensures the plugin has registered its action listener (`addAction("activate_plugin_{slug}", ...)`)
-            // so that it executes when `doAction` is fired.
+            // Load file BEFORE triggers
             try {
                 require_once $pluginFile;
             } catch (Throwable $t) {
@@ -350,12 +394,30 @@ class PluginManager
             $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
             if (file_exists($pluginFile)) {
                 $meta = $this->parsePluginHeader($pluginFile);
+                $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
+                $required_prefix = $clean_slug . '_';
 
-                // Dynamically clean up / remove permissions on deactivation
+                // 1. Drop associated custom Roles & Role-permissions linkage
+                if (!empty($meta['roles'])) {
+                    $roles_list = array_map('trim', explode(';', $meta['roles']));
+                    foreach ($roles_list as $role_expr) {
+                        if (strpos($role_expr, ':') === false) continue;
+                        list($role_raw, $role_perms_raw) = explode(':', $role_expr, 2);
+
+                        $role_raw = trim($role_raw);
+                        $clean_role = preg_replace('/[^a-zA-Z0-9_]/', '', $role_raw);
+                        if (strpos($clean_role, $required_prefix) !== 0) {
+                            $clean_role = $required_prefix . $clean_role;
+                        }
+
+                        $delete_stmt = $db->prepare("DELETE FROM roles WHERE role_name = ?");
+                        $delete_stmt->execute([$clean_role]);
+                    }
+                }
+
+                // 2. Dynamically clean up / remove permissions on deactivation
                 if (!empty($meta['permissions'])) {
                     $perm_list = array_map('trim', explode(',', $meta['permissions']));
-                    $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
-                    $required_prefix = $clean_slug . '_';
 
                     foreach ($perm_list as $perm_raw) {
                         $clean_perm = preg_replace('/[^a-zA-Z0-9_]/', '', $perm_raw);
@@ -376,7 +438,7 @@ class PluginManager
 
             $db->commit();
 
-            // CRITICAL FIX: Ensure the plugin's code is loaded during deactivation so its deactivation hooks are executed.
+            // Load file
             if (file_exists($pluginFile)) {
                 try {
                     require_once $pluginFile;

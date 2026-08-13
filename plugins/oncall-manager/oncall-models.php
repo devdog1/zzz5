@@ -554,11 +554,12 @@ function oncall_get_user_schedule_slots($user_id, $department_id) {
     $tb_slots = $pdb->getTableName('schedule_slots');
     $tb_depts = $pdb->getTableName('departments');
 
+    // Retrieve active and upcoming slots where end_time is in the future
     $sql = "
         SELECT s.*, d.name AS department_name
         FROM {$tb_slots} s
         JOIN {$tb_depts} d ON s.department_id = d.id
-        WHERE s.user_id = ? AND s.department_id = ? AND s.start_time >= NOW()
+        WHERE s.user_id = ? AND s.department_id = ? AND s.end_time >= NOW()
         ORDER BY s.start_time ASC
     ";
     return $pdb->query($sql, [$user_id, $department_id])->fetchAll();

@@ -80,24 +80,56 @@ $site_name = get_setting('site_name', 'Framework Portal');
                     </li>
                 <?php endif; ?>
 
-                <!-- Filter Hook for plugins to add navigation links dynamically -->
+                <!-- Filter Hook for plugins to add navigation links dynamically (supporting nested sub-menus) -->
                 <?php
                 $nav_links = [];
                 $nav_links = $pluginManager->applyFilters('theme_nav_links', $nav_links);
 
                 foreach ($nav_links as $link) {
+                    // Check top-level permission constraint
                     if (isset($link['permission']) && !has_permission($link['permission'])) {
                         continue;
                     }
-                    $active_class = (isset($_GET['route']) && $_GET['route'] === $link['route']) ? 'active' : '';
-                    echo '<li class="nav-item">';
-                    echo '<a class="nav-link ' . $active_class . '" href="index.php?route=' . urlencode($link['route']) . '">';
-                    if (isset($link['icon'])) {
-                        echo '<i class="' . htmlspecialchars($link['icon']) . ' me-1"></i> ';
+
+                    if (!empty($link['children']) && is_array($link['children'])) {
+                        // Render nested Bootstrap 5 Dropdown sub-menu
+                        echo '<li class="nav-item dropdown">';
+                        echo '<a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">';
+                        if (isset($link['icon'])) {
+                            echo '<i class="' . htmlspecialchars($link['icon']) . ' me-1"></i> ';
+                        }
+                        echo htmlspecialchars($link['label']);
+                        echo '</a>';
+                        echo '<ul class="dropdown-menu">';
+
+                        foreach ($link['children'] as $child) {
+                            if (isset($child['permission']) && !has_permission($child['permission'])) {
+                                continue;
+                            }
+                            echo '<li>';
+                            echo '<a class="dropdown-item" href="index.php?route=' . urlencode($child['route']) . '">';
+                            if (isset($child['icon'])) {
+                                echo '<i class="' . htmlspecialchars($child['icon']) . ' me-2 text-secondary"></i> ';
+                            }
+                            echo htmlspecialchars($child['label']);
+                            echo '</a>';
+                            echo '</li>';
+                        }
+
+                        echo '</ul>';
+                        echo '</li>';
+                    } else {
+                        // Render standard Top-Level navigation node
+                        $active_class = (isset($_GET['route']) && $_GET['route'] === $link['route']) ? 'active' : '';
+                        echo '<li class="nav-item">';
+                        echo '<a class="nav-link ' . $active_class . '" href="index.php?route=' . urlencode($link['route']) . '">';
+                        if (isset($link['icon'])) {
+                            echo '<i class="' . htmlspecialchars($link['icon']) . ' me-1"></i> ';
+                        }
+                        echo htmlspecialchars($link['label']);
+                        echo '</a>';
+                        echo '</li>';
                     }
-                    echo htmlspecialchars($link['label']);
-                    echo '</a>';
-                    echo '</li>';
                 }
                 ?>
             </ul>
