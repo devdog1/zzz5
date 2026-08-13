@@ -67,6 +67,13 @@ $site_name = get_setting('site_name', 'Framework Portal');
                 </li>
 
                 <!-- Core Administration Links -->
+                <?php if (has_permission('manage_plugins')): ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= ($current_page === 'admin-plugins.php') ? 'active' : '' ?>" href="admin-plugins.php">
+                            <i class="fa-solid fa-puzzle-piece me-1"></i> Modules & Plugins
+                        </a>
+                    </li>
+                <?php endif; ?>
                 <?php if (has_permission('manage_settings')): ?>
                     <li class="nav-item">
                         <a class="nav-link <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">

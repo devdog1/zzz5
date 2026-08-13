@@ -78,3 +78,11 @@ CREATE TABLE IF NOT EXISTS plug_oncall_manager_settings (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- 9. Zabbix to Local Users Mapping table
+CREATE TABLE IF NOT EXISTS plug_oncall_manager_zabbix_user_map (
+    zabbix_userid BIGINT NOT NULL PRIMARY KEY,
+    local_user_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (local_user_id) REFERENCES users(id) ON DELETE CASCADE
+);

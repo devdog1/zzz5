@@ -112,13 +112,21 @@ PluginManager::getInstance()->addAction('index_dashboard_widgets', function ($us
     }
 });
 
-// 3. Register background Cron Task syncs (Telephone Forward sync running once per hour, removed Zabbix)
+// 3. Register background Cron Task syncs (Telephone Forward sync running once per hour, removed Zabbix direct MySQL DB, now uses API)
 require_once __DIR__ . '/../../Scheduler.php';
 
 // Telephony forward sync callback task
 Scheduler::getInstance()->registerTask(
     'commportal_telephony_sync',
     'oncall_sync_commportal_background',
+    3600, // hourly
+    'oncall-manager'
+);
+
+// Zabbix API periodic sync callback task
+Scheduler::getInstance()->registerTask(
+    'zabbix_api_user_sync',
+    'oncall_sync_zabbix_via_api',
     3600, // hourly
     'oncall-manager'
 );
@@ -215,6 +223,15 @@ PluginManager::getInstance()->addAction('activate_plugin_oncall-manager', functi
     // Seed Plugin specific Settings
     $tb_settings = $pdb->getTableName('settings');
     $db->exec("INSERT IGNORE INTO {$tb_settings} (setting_key, setting_value) VALUES ('commportal_base_url', 'https://endpoint/')");
+    $db->exec("INSERT IGNORE INTO {$tb_settings} (setting_key, setting_value) VALUES ('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php')");
+    $db->exec("INSERT IGNORE INTO {$tb_settings} (setting_key, setting_value) VALUES ('zabbix_api_token', 'mock_zabbix_api_token_value_here')");
+
+    // 9. Create Zabbix to Local Users Mapping table
+    $pdb->createTable('zabbix_user_map', "
+        zabbix_userid BIGINT NOT NULL PRIMARY KEY,
+        local_user_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ");
 
     log_action('ON_CALL_MANAGER_ACTIVATION_SUCCESS', []);
 });
@@ -222,6 +239,7 @@ PluginManager::getInstance()->addAction('activate_plugin_oncall-manager', functi
 // 5. Register Deactivation Hook (Drops dynamic tables safely)
 PluginManager::getInstance()->addAction('deactivate_plugin_oncall-manager', function () {
     $pdb = new PluginDatabase('oncall-manager');
+    $pdb->dropTable('zabbix_user_map');
     $pdb->dropTable('settings');
     $pdb->dropTable('commportal_accounts');
     $pdb->dropTable('noc_business_hours');

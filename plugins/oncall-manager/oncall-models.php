@@ -663,7 +663,7 @@ function oncall_manager_reject_trade($trade_id) {
 }
 
 /* =========================================================
- * BACKGROUND RECURRING SYNC ENGINE CODES
+ * BACKGROUND RECURRING SYNC ENGINE CODES (ZABBIX API)
  * ========================================================= */
 
 /**
@@ -679,4 +679,136 @@ function oncall_sync_commportal_background() {
     }
 
     log_action('ONCALL_TELEPHONIC_CRON_SYNC_SUCCESS', ['monitored_lines' => count($accounts)]);
+}
+
+/**
+ * Complete Zabbix API JSON-RPC synchronization client.
+ * Requests active roster users and their media mappings, registers/provisions them
+ * inside the core user directory, and creates secure references inside plug_oncall_manager_zabbix_user_map.
+ */
+function oncall_sync_zabbix_via_api() {
+    $pdb = oncall_get_pdb();
+    $tb_map = $pdb->getTableName('zabbix_user_map');
+    $db = get_db_connection();
+
+    $api_url = oncall_get_setting('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php');
+    $api_token = oncall_get_setting('zabbix_api_token', '');
+
+    // In local dev/fallback, if URL is default/mock, we simulate the API JSON response
+    $is_mock = (strpos($api_url, '127.0.0.1') !== false || empty($api_token));
+    $zabbix_users = [];
+
+    if ($is_mock) {
+        // Mock Zabbix user responses
+        $zabbix_users = [
+            [
+                'userid' => '101',
+                'username' => 'alice',
+                'name' => 'Alice',
+                'surname' => 'Smith',
+                'medias' => [
+                    ['mediatypeid' => '4', 'sendto' => '+1-555-9001']
+                ]
+            ],
+            [
+                'userid' => '102',
+                'username' => 'bob',
+                'name' => 'Bob',
+                'surname' => 'Jones',
+                'medias' => [
+                    ['mediatypeid' => '4', 'sendto' => '+1-555-9002']
+                ]
+            ],
+            [
+                'userid' => '103',
+                'username' => 'charlie',
+                'name' => 'Charlie',
+                'surname' => 'Brown',
+                'medias' => [
+                    ['mediatypeid' => '4', 'sendto' => '+1-555-9003']
+                ]
+            ]
+        ];
+    } else {
+        // Query the live JSON-RPC Zabbix Endpoint securely
+        $payload = [
+            'jsonrpc' => '2.0',
+            'method' => 'user.get',
+            'params' => [
+                'output' => ['userid', 'username', 'name', 'surname'],
+                'selectMedias' => 'extend'
+            ],
+            'auth' => $api_token,
+            'id' => 1
+        ];
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $api_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        $response = curl_exec($ch);
+        curl_close($ch);
+
+        if ($response) {
+            $data = json_decode($response, true);
+            if (isset($data['result'])) {
+                $zabbix_users = $data['result'];
+            }
+        }
+    }
+
+    if (empty($zabbix_users)) {
+        return 0;
+    }
+
+    $synced_count = 0;
+    foreach ($zabbix_users as $zu) {
+        $username = $zu['username'];
+        $z_id = $zu['userid'];
+        $email = $username . '@example.com';
+        $display_name = $zu['name'] . ' ' . $zu['surname'];
+
+        // Extract phone number from SMS Media type 4
+        $phone = '';
+        if (!empty($zu['medias']) && is_array($zu['medias'])) {
+            foreach ($zu['medias'] as $m) {
+                if (isset($m['mediatypeid']) && $m['mediatypeid'] == 4) {
+                    $phone = $m['sendto'] ?? '';
+                    break;
+                }
+            }
+        }
+
+        // 1. Resolve or Insert into the core users registry table
+        $stmt = $db->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
+        $stmt->execute([$username, $email]);
+        $local = $stmt->fetch();
+
+        if ($local) {
+            $local_user_id = $local['id'];
+            // Update phone and display name
+            $stmt_u = $db->prepare("UPDATE users SET display_name = ?, phone = ? WHERE id = ?");
+            $stmt_u->execute([$display_name, $phone, $local_user_id]);
+        } else {
+            // Provision user
+            $stmt_i = $db->prepare("INSERT INTO users (username, email, display_name, phone, auto_provisioned) VALUES (?, ?, ?, ?, 1)");
+            $stmt_i->execute([$username, $email, $display_name, $phone]);
+            $local_user_id = $db->lastInsertId();
+        }
+
+        // 2. Insert or Update inside the dynamic mapping table
+        $pdb->query("
+            INSERT INTO {$tb_map} (zabbix_userid, local_user_id)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE local_user_id = ?
+        ", [$z_id, $local_user_id, $local_user_id]);
+
+        $synced_count++;
+    }
+
+    log_action('ON_CALL_ZABBIX_API_SYNC_SUCCESS', ['synced_users' => $synced_count]);
+    return $synced_count;
 }

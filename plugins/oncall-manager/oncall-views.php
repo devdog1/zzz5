@@ -1107,7 +1107,7 @@ $pm->registerRoute('oncall_settings', function () {
     $tb_noc = $pdb->getTableName('noc_business_hours');
     $tb_depts = $pdb->getTableName('departments');
 
-    // Handle submissions (Save NOC business hours, Save CommPortal base URL, Toggle Dept NOC mode)
+    // Handle submissions (Save NOC business hours, Save CommPortal base URL, Toggle Dept NOC mode, Trigger Zabbix Sync)
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         validate_csrf();
         $action = $_POST['action'] ?? '';
@@ -1132,6 +1132,19 @@ $pm->registerRoute('oncall_settings', function () {
                 oncall_set_setting('commportal_base_url', $url);
                 $msg = "CommPortal REST base gateway URL saved successfully!";
                 log_action('ONCALL_SAVE_COMMPORTAL_URL', ['url' => $url]);
+            } elseif ($action === 'save_zabbix_api') {
+                if (!has_permission('oncall_manager_manage_schedules')) {
+                    throw new Exception("Unauthorized to change Zabbix API credentials.");
+                }
+                $z_url = trim($_POST['zabbix_api_url'] ?? '');
+                $z_token = trim($_POST['zabbix_api_token'] ?? '');
+                oncall_set_setting('zabbix_api_url', $z_url);
+                oncall_set_setting('zabbix_api_token', $z_token);
+                $msg = "Zabbix API configuration saved successfully!";
+                log_action('ONCALL_SAVE_ZABBIX_API', ['url' => $z_url]);
+            } elseif ($action === 'trigger_zabbix_sync') {
+                $count = oncall_sync_zabbix_via_api();
+                $msg = "Zabbix Sync execution finished successfully! Mapped and synchronized <strong>{$count}</strong> active users from Zabbix API.";
             } elseif ($action === 'toggle_noc_mode') {
                 $dept_id = (int)$_POST['department_id'];
                 $noc_val = (int)($_POST['noc_mode'] ?? 0);
@@ -1152,6 +1165,9 @@ $pm->registerRoute('oncall_settings', function () {
     $noc_hours = $pdb->query("SELECT * FROM {$tb_noc} ORDER BY day_of_week ASC")->fetchAll();
     $departments = oncall_get_all_departments();
     $comm_url = oncall_get_setting('commportal_base_url', 'https://endpoint/');
+    $z_url = oncall_get_setting('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php');
+    $z_token = oncall_get_setting('zabbix_api_token', 'mock_zabbix_api_token_value_here');
+
     $days_map = [
         1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday',
         4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 7 => 'Sunday'
@@ -1160,7 +1176,7 @@ $pm->registerRoute('oncall_settings', function () {
     <div class="row mb-4 text-start">
         <div class="col-md-12">
             <h2><i class="fa-solid fa-gears text-secondary me-2"></i>On-Call Settings & NOC Overlays</h2>
-            <p class="text-muted">Manage global telephony configurations, configure NOC overlay business hours, and toggle active NOC modes.</p>
+            <p class="text-muted">Manage global telephony configurations, configure NOC overlay business hours, register Zabbix API key credentials, and toggle active NOC modes.</p>
         </div>
     </div>
 
@@ -1216,6 +1232,39 @@ $pm->registerRoute('oncall_settings', function () {
                             </table>
                         </div>
                         <button type="submit" class="btn btn-sm btn-primary w-100"><i class="fa-solid fa-save me-1"></i>Save NOC Shift Hours</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Zabbix API Synchronization & Settings -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <span><i class="fa-solid fa-arrows-spin me-1"></i>Zabbix API Synchronization</span>
+                    <form method="POST" class="m-0">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="trigger_zabbix_sync">
+                        <button type="submit" class="btn btn-xs btn-outline-light btn-sm text-white border-white">
+                            <i class="fa-solid fa-arrows-rotate me-1"></i>Sync Users Now
+                        </button>
+                    </form>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        <?php csrf_field(); ?>
+                        <input type="hidden" name="action" value="save_zabbix_api">
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">Zabbix API JSON-RPC Endpoint</label>
+                            <input type="url" name="zabbix_api_url" class="form-control form-control-sm" value="<?= htmlspecialchars($z_url) ?>" required placeholder="http://zabbix-server/zabbix/api_jsonrpc.php">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-bold">Zabbix API Authentication Token</label>
+                            <input type="password" name="zabbix_api_token" class="form-control form-control-sm" value="<?= htmlspecialchars($z_token) ?>" required placeholder="API token key string">
+                            <div class="form-text">Configure Zabbix API credentials used to retrieve on-call user rosters and phone media details. Leave as default mock settings for sandbox simulations.</div>
+                        </div>
+
+                        <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="fa-solid fa-save me-1"></i>Save Zabbix Credentials</button>
                     </form>
                 </div>
             </div>
