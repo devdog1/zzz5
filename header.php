@@ -61,16 +61,23 @@ $site_name = get_setting('site_name', 'Framework Portal');
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav me-auto">
                 <li class="nav-item">
-                    <a class="nav-link <?= ($current_page === 'index.php') ? 'active' : '' ?>" href="index.php">
+                    <a class="nav-link <?= ($current_page === 'index.php' && !isset($_GET['route'])) ? 'active' : '' ?>" href="index.php">
                         <i class="fa-solid fa-house me-1"></i> Dashboard
                     </a>
                 </li>
 
+                <!-- Core Administration Links -->
+                <?php if (has_permission('manage_settings')): ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
+                            <i class="fa-solid fa-users-gear me-1"></i> Users & RBAC
+                        </a>
+                    </li>
+                <?php endif; ?>
+
                 <!-- Filter Hook for plugins to add navigation links dynamically -->
                 <?php
-                $nav_links = [
-                    // Each link has 'url', 'label', 'icon', 'permission' (optional)
-                ];
+                $nav_links = [];
                 $nav_links = $pluginManager->applyFilters('theme_nav_links', $nav_links);
 
                 foreach ($nav_links as $link) {
