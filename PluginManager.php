@@ -316,6 +316,15 @@ class PluginManager
             $db->commit();
             $this->activePlugins[] = $slug;
 
+            // CRITICAL FIX: Dynamically require the plugin file BEFORE triggering the activation action hook.
+            // This ensures the plugin has registered its action listener (`addAction("activate_plugin_{slug}", ...)`)
+            // so that it executes when `doAction` is fired.
+            try {
+                require_once $pluginFile;
+            } catch (Throwable $t) {
+                error_log("Failed to include plugin file upon activation: " . $t->getMessage());
+            }
+
             // Trigger activation action hook safely
             $this->doAction("activate_plugin_{$slug}");
             return true;
@@ -354,7 +363,7 @@ class PluginManager
                             $clean_perm = $required_prefix . $clean_perm;
                         }
 
-                        // Remove permission safely from permissions table (will cascade drop links to user_permissions)
+                        // Remove permission safely from permissions table
                         $delete_stmt = $db->prepare("DELETE FROM permissions WHERE permission_name = ?");
                         $delete_stmt->execute([$clean_perm]);
                     }
@@ -367,12 +376,22 @@ class PluginManager
 
             $db->commit();
 
-            if (($key = array_search($slug, $this->activePlugins)) !== false) {
-                unset($this->activePlugins[$key]);
+            // CRITICAL FIX: Ensure the plugin's code is loaded during deactivation so its deactivation hooks are executed.
+            if (file_exists($pluginFile)) {
+                try {
+                    require_once $pluginFile;
+                } catch (Throwable $t) {
+                    error_log("Failed to include plugin file upon deactivation: " . $t->getMessage());
+                }
             }
 
             // Trigger deactivation action hook safely
             $this->doAction("deactivate_plugin_{$slug}");
+
+            if (($key = array_search($slug, $this->activePlugins)) !== false) {
+                unset($this->activePlugins[$key]);
+            }
+
             return true;
         } catch (Exception $e) {
             $db->rollBack();
