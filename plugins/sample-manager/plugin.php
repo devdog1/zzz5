@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Sample Manager
-Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, widgets, and shared inter-plugin services inside the Base Framework.
-Version: 1.3.0
+Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, widgets, dynamic table creation, and shared inter-plugin services inside the Base Framework.
+Version: 1.4.0
 Author: Framework Developers
 */
 
@@ -30,13 +30,16 @@ PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function
         return;
     }
 
-    // Handle settings submission inside module
+    // Handle settings submission inside module with secure CSRF verification
     $msg = '';
     if (isset($_POST['save_sample_settings'])) {
+        // CSRF verification check!
+        validate_csrf();
+
         $sample_token = trim($_POST['sample_api_token'] ?? '');
         set_setting('sample_manager_api_token', $sample_token);
         log_action('SAMPLE_MANAGER_SETTINGS_SAVE', ['sample_api_token' => '***']);
-        $msg = "Sample Settings saved successfully!";
+        $msg = "Sample Settings saved successfully (CSRF Verified)!";
     }
 
     $currentToken = get_setting('sample_manager_api_token', 'default_mock_api_token');
@@ -60,13 +63,16 @@ PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function
                 </div>
                 <div class="card-body">
                     <form method="POST">
+                        <!-- Core security anti-forgery field token -->
+                        <?php csrf_field(); ?>
+
                         <div class="mb-3">
                             <label class="form-label fw-bold">Sample API Secret Token</label>
                             <input type="text" name="sample_api_token" class="form-control" value="<?= htmlspecialchars($currentToken) ?>" required>
                             <div class="form-text">Configure arbitrary setting options stored securely in the core <code>settings</code> table.</div>
                         </div>
                         <button type="submit" name="save_sample_settings" class="btn btn-primary">
-                            <i class="fa-solid fa-floppy-disk me-1"></i>Save Configuration
+                            <i class="fa-solid fa-floppy-disk me-1"></i>Save Configuration (CSRF Protected)
                         </button>
                     </form>
                 </div>
@@ -151,4 +157,25 @@ PluginManager::getInstance()->addAction('index_dashboard_widgets', function($use
         </div>
     </div>
     <?php
+});
+
+// 7. Safe Plugin Database Isolation Demonstration
+require_once __DIR__ . '/../../PluginDatabase.php';
+
+// Safe Plugin activation event hook - creates dynamic plugin-prefixed tables
+PluginManager::getInstance()->addAction('activate_plugin_sample-manager', function() {
+    $pdb = new PluginDatabase('sample-manager');
+    $pdb->createTable('logs', "
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        log_message VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ");
+    log_action('SAMPLE_PLUGIN_ACTIVATE_DB_SUCCESS', []);
+});
+
+// Safe Plugin deactivation event hook - drops plugin-prefixed tables clean
+PluginManager::getInstance()->addAction('deactivate_plugin_sample-manager', function() {
+    $pdb = new PluginDatabase('sample-manager');
+    $pdb->dropTable('logs');
+    log_action('SAMPLE_PLUGIN_DEACTIVATE_DB_SUCCESS', []);
 });

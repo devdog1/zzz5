@@ -73,6 +73,11 @@ $site_name = get_setting('site_name', 'Framework Portal');
                             <i class="fa-solid fa-users-gear me-1"></i> Users & RBAC
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= ($current_page === 'admin-diagnostics.php') ? 'active' : '' ?>" href="admin-diagnostics.php">
+                            <i class="fa-solid fa-stethoscope me-1"></i> Diagnostics
+                        </a>
+                    </li>
                 <?php endif; ?>
 
                 <!-- Filter Hook for plugins to add navigation links dynamically -->

@@ -40,6 +40,45 @@ function require_login() {
 }
 
 /* =========================================================
+ * SECURITY: CSRF (Anti-Forgery Tokens)
+ * ========================================================= */
+
+/**
+ * Generate a cryptographically secure CSRF token and store it in session.
+ */
+function get_csrf_token() {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/**
+ * Render a hidden HTML input containing the active CSRF token.
+ */
+function csrf_field() {
+    echo '<input type="hidden" name="csrf_token" value="' . htmlspecialchars(get_csrf_token()) . '">';
+}
+
+/**
+ * Validate that the incoming request contains a valid anti-forgery token.
+ */
+function validate_csrf() {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $token = $_POST['csrf_token'] ?? '';
+        $session_token = $_SESSION['csrf_token'] ?? '';
+        if (empty($token) || empty($session_token) || !hash_equals($session_token, $token)) {
+            // Log security warning
+            log_action('SECURITY_CSRF_VIOLATION', ['ip' => $_SERVER['REMOTE_ADDR'] ?? 'Unknown']);
+
+            // Render basic warning screen and exit
+            http_response_code(403);
+            die("<h1>403 Forbidden: Security CSRF Verification Failed.</h1><p>Please reload the page and try again.</p>");
+        }
+    }
+}
+
+/* =========================================================
  * SYSTEM SETTINGS API
  * ========================================================= */
 
