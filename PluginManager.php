@@ -231,7 +231,8 @@ class PluginManager
             'name' => basename(dirname($file)),
             'description' => 'No description provided.',
             'version' => '1.0.0',
-            'author' => 'Anonymous'
+            'author' => 'Anonymous',
+            'permissions' => ''
         ];
 
         if (preg_match('/Plugin Name:\s*(.*)$/mi', $content, $matches)) {
@@ -246,6 +247,10 @@ class PluginManager
         if (preg_match('/Author:\s*(.*)$/mi', $content, $matches)) {
             $meta['author'] = trim($matches[1]);
         }
+        // Extract optional comma-separated list of custom permissions from headers
+        if (preg_match('/Permissions:\s*(.*)$/mi', $content, $matches)) {
+            $meta['permissions'] = trim($matches[1]);
+        }
 
         return $meta;
     }
@@ -259,17 +264,66 @@ class PluginManager
     {
         if ($this->isPluginActive($slug)) return true;
 
+        $db = get_db_connection();
+        $db->beginTransaction();
+
         try {
-            $db = get_db_connection();
+            // Find and parse plugin metadata headers
+            $pluginsDir = __DIR__ . '/plugins';
+            $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
+            if (!file_exists($pluginFile)) {
+                throw new Exception("Plugin file not found: " . $pluginFile);
+            }
+
+            $meta = $this->parsePluginHeader($pluginFile);
+
+            // Dynamically load, validate, prefix, and register permissions to DB
+            if (!empty($meta['permissions'])) {
+                $perm_list = array_map('trim', explode(',', $meta['permissions']));
+
+                // Enforce that permissions must be uniquely prefixed with the plugin slug
+                $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
+                $required_prefix = $clean_slug . '_';
+
+                foreach ($perm_list as $perm_raw) {
+                    $clean_perm = preg_replace('/[^a-zA-Z0-9_]/', '', $perm_raw);
+
+                    // Enforce prefixing permission names with the plugin name
+                    if (strpos($clean_perm, $required_prefix) !== 0) {
+                        $clean_perm = $required_prefix . $clean_perm;
+                    }
+
+                    // Enforce that active plugins CANNOT share/conflict a permission name
+                    $check_stmt = $db->prepare("SELECT id FROM permissions WHERE permission_name = ?");
+                    $check_stmt->execute([$clean_perm]);
+                    $exists = $check_stmt->fetch();
+
+                    if ($exists) {
+                        // Conflict found! Abort enablement
+                        throw new Exception("Security Conflict: The permission name '{$clean_perm}' is already registered in the system.");
+                    }
+
+                    // Insert custom permission dynamically to database
+                    $insert_stmt = $db->prepare("INSERT INTO permissions (permission_name, description) VALUES (?, ?)");
+                    $insert_stmt->execute([$clean_perm, "Dynamic permission registered by plugin: " . $meta['name']]);
+                }
+            }
+
+            // Save active state to DB
             $stmt = $db->prepare("INSERT IGNORE INTO active_plugins (plugin_slug) VALUES (?)");
             $stmt->execute([$slug]);
 
+            $db->commit();
             $this->activePlugins[] = $slug;
 
             // Trigger activation action hook safely
             $this->doAction("activate_plugin_{$slug}");
             return true;
         } catch (Exception $e) {
+            $db->rollBack();
+            error_log("Failed to activate plugin {$slug}: " . $e->getMessage());
+            global $err;
+            $err = $e->getMessage();
             return false;
         }
     }
@@ -278,10 +332,40 @@ class PluginManager
     {
         if (!$this->isPluginActive($slug)) return true;
 
+        $db = get_db_connection();
+        $db->beginTransaction();
+
         try {
-            $db = get_db_connection();
+            // Find and parse plugin metadata headers
+            $pluginsDir = __DIR__ . '/plugins';
+            $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
+            if (file_exists($pluginFile)) {
+                $meta = $this->parsePluginHeader($pluginFile);
+
+                // Dynamically clean up / remove permissions on deactivation
+                if (!empty($meta['permissions'])) {
+                    $perm_list = array_map('trim', explode(',', $meta['permissions']));
+                    $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
+                    $required_prefix = $clean_slug . '_';
+
+                    foreach ($perm_list as $perm_raw) {
+                        $clean_perm = preg_replace('/[^a-zA-Z0-9_]/', '', $perm_raw);
+                        if (strpos($clean_perm, $required_prefix) !== 0) {
+                            $clean_perm = $required_prefix . $clean_perm;
+                        }
+
+                        // Remove permission safely from permissions table (will cascade drop links to user_permissions)
+                        $delete_stmt = $db->prepare("DELETE FROM permissions WHERE permission_name = ?");
+                        $delete_stmt->execute([$clean_perm]);
+                    }
+                }
+            }
+
+            // Remove active state
             $stmt = $db->prepare("DELETE FROM active_plugins WHERE plugin_slug = ?");
             $stmt->execute([$slug]);
+
+            $db->commit();
 
             if (($key = array_search($slug, $this->activePlugins)) !== false) {
                 unset($this->activePlugins[$key]);
@@ -291,6 +375,8 @@ class PluginManager
             $this->doAction("deactivate_plugin_{$slug}");
             return true;
         } catch (Exception $e) {
+            $db->rollBack();
+            error_log("Failed to deactivate plugin {$slug}: " . $e->getMessage());
             return false;
         }
     }

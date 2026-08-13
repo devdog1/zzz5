@@ -15,6 +15,7 @@ An elegant, extensible, enterprise-grade PHP/MySQL modular portal framework. Dev
    - [Extensible Route Handlers](#extensible-route-handlers)
    - [Dynamic Home Screen Widgets](#dynamic-home-screen-widgets)
    - [Inter-Plugin Exposed Services](#inter-plugin-exposed-services)
+   - [Plugin Dynamic Permission Loading](#plugin-dynamic-permission-loading)
    - [Database Isolation & Prefixing](#database-isolation--prefixing)
    - [Task Scheduler API](#task-scheduler-api)
    - [Permission and Role Checks](#permission-and-role-checks)
@@ -106,6 +107,7 @@ Plugin Name: My Awesome Module
 Description: Registers custom layout segments and matches custom pages.
 Version: 1.0.0
 Author: John Doe
+Permissions: manage_module_options, view_module_stats
 */
 ```
 
@@ -125,7 +127,7 @@ Filters accept a variable, alter it, and return it.
           'route' => 'my_custom_view',
           'label' => 'My Feature Page',
           'icon'  => 'fa-solid fa-star',
-          'permission' => 'view_dashboard' // Required permission to display
+          'permission' => 'my_awesome_module_view_module_stats' // Dynamic prefixed permission!
       ];
       return $links;
   });
@@ -215,6 +217,16 @@ Plugins can expose internal helper functions or processed data models to sibling
       echo "Failed to invoke service: " . $e->getMessage();
   }
   ```
+
+---
+
+### Plugin Dynamic Permission Loading
+
+This framework manages dynamic permission provisioning. When a plugin is enabled / activated, any permissions listed under the `Permissions:` metadata key inside the header comments are registered dynamically in the system.
+
+- **Collision Protection**: Plugins cannot share or conflict with an existing permission name.
+- **Auto-Prefixing**: System automatically prefixes the permission with the plugin's slug name (e.g. `Permissions: manage_options` becomes `my_plugin_manage_options` in the system database).
+- **Graceful Cleanup**: When deactivating a plugin, its associated permissions are safely uninstalled from the `permissions` table, cascading cleanups to user mappings.
 
 ---
 

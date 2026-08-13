@@ -2,8 +2,9 @@
 /*
 Plugin Name: Sample Manager
 Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, widgets, dynamic table creation, and shared inter-plugin services inside the Base Framework.
-Version: 1.4.0
+Version: 1.5.0
 Author: Framework Developers
+Permissions: manage_sample_settings, view_sample_stats
 */
 
 // Prevent direct access
@@ -13,20 +14,21 @@ if (!class_exists('PluginManager')) {
 
 // 1. Hook to register custom navigation tab
 PluginManager::getInstance()->addFilter('theme_nav_links', function ($links) {
+    // Limits visibility to active users explicitly granted our plugin-specific prefixed permissions!
     $links[] = [
         'route' => 'sample_manager_dashboard',
         'label' => 'Sample Manager',
         'icon'  => 'fa-solid fa-wand-magic-sparkles',
-        'permission' => 'view_dashboard' // Core generic permission
+        'permission' => 'sample_manager_view_sample_stats' // Auto-prefixed permissions registered during enablement!
     ];
     return $links;
 });
 
 // 2. Hook to register route callback
 PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function () {
-    // Check custom permissions if needed, or core permissions
-    if (!has_permission('view_dashboard')) {
-        echo '<div class="alert alert-danger">Access Denied.</div>';
+    // Check custom permissions explicitly
+    if (!has_permission('sample_manager_view_sample_stats')) {
+        echo '<div class="alert alert-danger">Access Denied. You need the dynamic permission "sample_manager_view_sample_stats" to access this screen.</div>';
         return;
     }
 
@@ -35,6 +37,12 @@ PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function
     if (isset($_POST['save_sample_settings'])) {
         // CSRF verification check!
         validate_csrf();
+
+        // Enforce extra granular action security checks
+        if (!has_permission('sample_manager_manage_sample_settings')) {
+            echo '<div class="alert alert-danger">Action Denied: You do not have permission sample_manager_manage_sample_settings to write configuration.</div>';
+            return;
+        }
 
         $sample_token = trim($_POST['sample_api_token'] ?? '');
         set_setting('sample_manager_api_token', $sample_token);
