@@ -12,7 +12,8 @@ An elegant, extensible, enterprise-grade PHP/MySQL modular portal framework. Dev
    - [Plugin Headers](#plugin-headers)
    - [Hook System (Actions & Filters)](#hook-system-actions--filters)
    - [Extensible Route Handlers](#extensible-route-handlers)
-   - [Database and Global Settings API](#database-and-global-settings-api)
+   - [Database Isolation & prefixing](#database-isolation--prefixing)
+   - [Task Scheduler API](#task-scheduler-api)
    - [Permission and Role Checks](#permission-and-role-checks)
 4. [Sample Plugin Walkthrough](#sample-plugin-walkthrough)
 5. [Administrative Interfaces](#administrative-interfaces)
@@ -25,9 +26,10 @@ This framework separates **Core Platform Concerns** (Authentication, User Provis
 
 Key components:
 - **`PluginManager.php`**: The orchestrator. Handles discovery, metadata extraction, plugin activation lifecycle, custom route matching, and event dispatching.
+- **`PluginDatabase.php`**: Exposes secure SQL isolation wrappers ensuring plugins operate strictly inside safe prefixes (`plug_{slug}_`) to prevent collision or corruption of other modules.
+- **`Scheduler.php`**: Custom task scheduler containing standard error-shield try-catch sandboxes so individual plugin cron failures do not disturb baseline site operation.
 - **`Auth.php` & `AzureADSSO.php`**: Secure OAuth2 Single Sign-On (SSO) integration with Azure Active Directory. Includes standard fallbacks for local developer environments.
 - **`admin-users.php`**: Built-in visual interface to manage users, assign roles, grant specific permissions, and block/deny specific user rights.
-- **Hook Registry (`theme_nav_links`, `theme_head`, `theme_footer`)**: Places where plugins hook in to enrich layout nodes, CSS styles, footer analytics scripts, and main header navigation links dynamically.
 
 ---
 
@@ -123,13 +125,6 @@ Actions are run at specific points to inject visual tags or run background tasks
   });
   ```
 
-* **`theme_footer`**: Inject JS execution blocks or performance tracker widgets.
-  ```php
-  PluginManager::getInstance()->addAction('theme_footer', function() {
-      echo '<script>console.log("My Awesome Module loaded successfully!");</script>';
-  });
-  ```
-
 ---
 
 ### Extensible Route Handlers
@@ -138,13 +133,11 @@ Match URLs dynamically and delegate drawing the page output cleanly to your plug
 
 ```php
 PluginManager::getInstance()->registerRoute('my_custom_view', function() {
-    // Check permission safeguards
     if (!has_permission('view_dashboard')) {
         echo '<div class="alert alert-danger">Access Denied.</div>';
         return;
     }
 
-    // Output raw or themed content
     ?>
     <div class="card p-4">
         <h3>Welcome to My Custom Extensible Route!</h3>
@@ -158,25 +151,54 @@ To visit this view, load `index.php?route=my_custom_view` in your browser.
 
 ---
 
-### Database and Global Settings API
+### Database Isolation & prefixing
 
-Store configuration values without needing separate migrations. The global key-value store is built-in:
+To ensure plugins can use the Database for their specific needs without colliding with or breaking the core, the framework exposes `PluginDatabase.php`.
 
-* **Retrieve Setting**:
-  ```php
-  $api_key = get_setting('my_plugin_api_key', 'default_mock_value');
-  ```
+Each plugin is sandboxed into tables starting with `plug_{plugin_slug}_`.
 
-* **Write / Update Setting**:
-  ```php
-  set_setting('my_plugin_api_key', 'new_secure_token');
-  ```
+```php
+require_once __DIR__ . '/../../PluginDatabase.php';
 
-* **Audit Logs**:
-  Ensure changes and sensitive operations are logged securely:
-  ```php
-  log_action('MY_PLUGIN_UPDATE', ['updated_field' => 'api_key', 'status' => 'success']);
-  ```
+// Initialize the isolated Database Wrapper for your plugin
+$pdb = new PluginDatabase('my-awesome-module');
+
+// 1. Safe dynamic table creation (creates plug_my_awesome_module_records table)
+$pdb->createTable('records', "
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+");
+
+// 2. Querying inside your isolated schema
+$tableName = $pdb->getTableName('records');
+$pdb->query("INSERT INTO {$tableName} (title) VALUES (?)", ['Awesome Item']);
+
+$results = $pdb->query("SELECT * FROM {$tableName}")->fetchAll();
+```
+
+---
+
+### Task Scheduler API
+
+The framework contains a resilient Task Scheduler. Plugins can register background cron scripts that execute at custom intervals. The runner is heavily sandboxed so exceptions thrown in a plugin task will not affect sibling scripts.
+
+```php
+require_once __DIR__ . '/../../Scheduler.php';
+
+// Register background cron callback (e.g. running once every 3600 seconds)
+Scheduler::getInstance()->registerTask(
+    'sync_external_feed', // Task identifier key
+    'my_plugin_sync_callback', // Callable
+    3600, // Interval in seconds
+    'my-awesome-module' // Plugin slug
+);
+
+function my_plugin_sync_callback() {
+    // Perform isolated long running script safely
+    log_action('CRON_SYNC_TRIGGERED', ['plugin' => 'my-awesome-module']);
+}
+```
 
 ---
 
@@ -188,13 +210,6 @@ Protect sensitive views, endpoints, or forms using the RBAC Permission system:
   ```php
   if (has_permission('manage_settings')) {
       // Allow execution
-  }
-  ```
-
-* **Role Check**:
-  ```php
-  if (has_role('admin')) {
-      // Allow access
   }
   ```
 
@@ -213,7 +228,6 @@ Version: 1.1.0
 Author: Framework Developers
 */
 
-// Prevent direct execution outside the framework context
 if (!class_exists('PluginManager')) {
     exit;
 }
@@ -252,7 +266,6 @@ PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function
             <p>Demonstrates setting storage and custom navigation routes.</p>
         </div>
     </div>
-    <!-- Add forms and modules here... -->
     <?php
 });
 ```
@@ -264,7 +277,10 @@ PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function
 The Portal framework provides pre-built administration panels for platform maintainers:
 
 ### 1. Core Module Lifecycles
-Navigate to the main dashboard (`index.php`) to view discovered plugins. Admin users can activate and deactivate individual plugins instantly. This executes any specific background activation actions.
+Navigate to the main dashboard (`index.php`) to view discovered plugins. Admin users can activate and deactivate individual plugins instantly.
 
-### 2. Users and RBAC Directory (`admin-users.php`)
+### 2. Sandboxed Cron States
+Admin users can review background script run times, statuses, next execution targets, or failures directly from the dashboard view.
+
+### 3. Users and RBAC Directory (`admin-users.php`)
 Manage roles (`admin`, `manager`, `user`), manually assign direct exceptions (granting extra privileges), or block users from executing core features using denied permission overrides.

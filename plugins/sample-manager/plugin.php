@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Sample Manager
-Description: A sample plugin showing how to register custom settings, custom route, navigation tab, and hooks inside the Base Framework.
-Version: 1.1.0
+Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, and hooks inside the Base Framework.
+Version: 1.2.0
 Author: Framework Developers
 */
 
@@ -98,3 +98,15 @@ PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function
 PluginManager::getInstance()->addAction('theme_footer', function() {
     echo "<!-- Sample Manager Plugin Loaded Successfully -->";
 });
+
+// 4. Register a background task with Scheduler API
+require_once __DIR__ . '/../../Scheduler.php';
+Scheduler::getInstance()->registerTask(
+    'sample_cleanup_task',
+    function() {
+        // Run clean-up side-effects securely
+        log_action('SAMPLE_CLEANUP_CRON', ['status' => 'executed_cleanly']);
+    },
+    300, // run once every 5 minutes
+    'sample-manager'
+);

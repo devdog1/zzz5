@@ -106,6 +106,18 @@ CREATE TABLE IF NOT EXISTS active_plugins (
     activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 6. Task Scheduler Tracking Table
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    task_key VARCHAR(150) NOT NULL PRIMARY KEY,
+    plugin_slug VARCHAR(100) NOT NULL,
+    interval_seconds INT NOT NULL,
+    last_run DATETIME DEFAULT NULL,
+    next_run DATETIME DEFAULT NULL,
+    status VARCHAR(50) DEFAULT 'idle',
+    error_message TEXT DEFAULT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 -- Seed Initial Roles & Basic Permissions
 INSERT IGNORE INTO roles (id, role_name, description) VALUES
 (1, 'admin', 'Global Administrator with full rights'),

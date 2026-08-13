@@ -1,5 +1,6 @@
 <?php
 // PluginManager.php - Robust WordPress-inspired Hooks, Filters, Routing & Plugin Management Engine
+require_once __DIR__ . '/db.php';
 
 class PluginManager
 {
@@ -45,7 +46,16 @@ class PluginManager
 
         foreach ($priorities as $priority => $callbacks) {
             foreach ($callbacks as $callback) {
-                call_user_func_array($callback, $arg);
+                // SANDBOX SHIELD: Wrap each plugin hook execution in try/catch to avoid one bad plugin crashing others or breaking core platform.
+                try {
+                    call_user_func_array($callback, $arg);
+                } catch (Throwable $t) {
+                    $error_msg = "Error executing action hook [{$tag}]: " . $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
+                    error_log($error_msg);
+                    if (function_exists('log_action')) {
+                        log_action('PLUGIN_HOOK_CRASH', ['tag' => $tag, 'error' => $error_msg]);
+                    }
+                }
             }
         }
     }
@@ -72,7 +82,16 @@ class PluginManager
 
         foreach ($priorities as $priority => $callbacks) {
             foreach ($callbacks as $callback) {
-                $value = call_user_func_array($callback, array_merge([$value], $arg));
+                // SANDBOX SHIELD: Wrap each filter hook execution in try/catch so if a plugin filter throws, we fall back to returning the current state instead of crashing.
+                try {
+                    $value = call_user_func_array($callback, array_merge([$value], $arg));
+                } catch (Throwable $t) {
+                    $error_msg = "Error executing filter hook [{$tag}]: " . $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
+                    error_log($error_msg);
+                    if (function_exists('log_action')) {
+                        log_action('PLUGIN_FILTER_CRASH', ['tag' => $tag, 'error' => $error_msg]);
+                    }
+                }
             }
         }
 
@@ -90,7 +109,17 @@ class PluginManager
     public function handleRoute($route)
     {
         if (isset($this->routes[$route])) {
-            call_user_func($this->routes[$route]);
+            // SANDBOX SHIELD: Wrap plugin route handlers in try/catch block
+            try {
+                call_user_func($this->routes[$route]);
+            } catch (Throwable $t) {
+                echo '<div class="alert alert-danger"><i class="fa-solid fa-bug me-1"></i> <strong>Critical Plugin Error:</strong> An uncaught exception occurred in this module view. Please check system audit trail.</div>';
+                $error_msg = "Uncaught route exception in [{$route}]: " . $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
+                error_log($error_msg);
+                if (function_exists('log_action')) {
+                    log_action('PLUGIN_ROUTE_CRASH', ['route' => $route, 'error' => $error_msg]);
+                }
+            }
             return true;
         }
         return false;
@@ -189,7 +218,7 @@ class PluginManager
 
             $this->activePlugins[] = $slug;
 
-            // Trigger activation action hook if any
+            // Trigger activation action hook safely
             $this->doAction("activate_plugin_{$slug}");
             return true;
         } catch (Exception $e) {
@@ -210,7 +239,7 @@ class PluginManager
                 unset($this->activePlugins[$key]);
             }
 
-            // Trigger deactivation action hook if any
+            // Trigger deactivation action hook safely
             $this->doAction("deactivate_plugin_{$slug}");
             return true;
         } catch (Exception $e) {
@@ -224,7 +253,12 @@ class PluginManager
         foreach ($this->activePlugins as $slug) {
             $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
             if (file_exists($pluginFile)) {
-                require_once $pluginFile;
+                // Wrap plugin booting / inclusion so parsing / run runtime failures do not break index page
+                try {
+                    require_once $pluginFile;
+                } catch (Throwable $t) {
+                    error_log("Error booting plugin [{$slug}]: " . $t->getMessage());
+                }
             }
         }
     }

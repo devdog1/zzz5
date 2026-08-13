@@ -1,6 +1,7 @@
 <?php
 // index.php - Main Portal Router and Core Administrative Panel
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/Scheduler.php';
 
 // Check if we are executing a custom plugin route
 $route = $_GET['route'] ?? null;
@@ -18,10 +19,12 @@ if ($route) {
     exit;
 }
 
-// Otherwise, render Core Core Dashboard & Plugin Management Panel
+// Otherwise, render Core Dashboard & Plugin Management Panel
 require_once __DIR__ . '/header.php';
 
-// Handle Action activation/deactivations
+$scheduler = Scheduler::getInstance();
+
+// Handle Action activation/deactivations or Manual Cron Trigger
 $msg = '';
 $err = '';
 if (has_permission('manage_plugins')) {
@@ -41,6 +44,15 @@ if (has_permission('manage_plugins')) {
         } else {
             $err = "Failed to deactivate module <strong>" . htmlspecialchars($slug) . "</strong>.";
         }
+    } elseif (isset($_POST['trigger_cron'])) {
+        // Force manual background tasks check/run for active plugins
+        try {
+            $scheduler->runPendingTasks();
+            $msg = "Task Scheduler triggered successfully! Pending tasks processed safely.";
+            log_action('SCHEDULER_MANUAL_TRIGGER', []);
+        } catch (Exception $e) {
+            $err = "Scheduler Trigger Error: " . $e->getMessage();
+        }
     }
 }
 
@@ -52,7 +64,7 @@ $activeCount = count($pluginManager->getActivePlugins());
 <div class="row mb-4">
     <div class="col-md-8">
         <h1 class="h2"><i class="fa-solid fa-gauge-high text-primary me-2"></i>Core Dashboard</h1>
-        <p class="text-muted">Manage active modules, system permissions, and configuration options.</p>
+        <p class="text-muted">Manage active modules, sandboxed background tasks, system permissions, and configuration options.</p>
     </div>
     <div class="col-md-4 text-md-end align-self-center">
         <span class="badge bg-secondary p-2"><i class="fa-solid fa-clock me-1"></i> <?= date('Y-m-d H:i:s') ?></span>
@@ -74,8 +86,10 @@ $activeCount = count($pluginManager->getActivePlugins());
 <?php endif; ?>
 
 <div class="row">
-    <!-- Left Column: Plugin Manager -->
+    <!-- Left Column: Plugin Manager & Background Scheduler -->
     <div class="col-lg-8">
+
+        <!-- Available Extension Plugins -->
         <div class="card mb-4 shadow-sm">
             <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
                 <span><i class="fa-solid fa-puzzle-piece me-2"></i>Available Extension Modules / Plugins</span>
@@ -134,6 +148,61 @@ $activeCount = count($pluginManager->getActivePlugins());
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Task Scheduler Dashboard -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <span><i class="fa-solid fa-clock-rotate-left me-2 text-warning"></i>Background Task Scheduler (Sandboxed)</span>
+                <?php if (has_permission('manage_plugins')): ?>
+                    <form method="POST" class="m-0">
+                        <button type="submit" name="trigger_cron" class="btn btn-xs btn-outline-warning text-white border-white btn-sm">
+                            <i class="fa-solid fa-arrows-spin me-1"></i>Trigger Cron Check
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+            <div class="card-body p-0">
+                <?php $states = $scheduler->getTaskExecutionStates(); ?>
+                <?php if (empty($states)): ?>
+                    <p class="text-muted p-4 mb-0"><i class="fa-solid fa-circle-info me-1 text-primary"></i>No background tasks have been logged by active plugins yet. Activate the <strong>Sample Manager</strong> plugin to schedule dynamic tasks.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 small">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Task Identifier</th>
+                                    <th>Plugin Source</th>
+                                    <th>Frequency</th>
+                                    <th>Last Execution</th>
+                                    <th>Next Run</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($states as $task): ?>
+                                    <tr>
+                                        <td><code><?= htmlspecialchars($task['task_key']) ?></code></td>
+                                        <td><span class="badge bg-secondary"><?= htmlspecialchars($task['plugin_slug']) ?></span></td>
+                                        <td><?= htmlspecialchars($task['interval_seconds']) ?>s</td>
+                                        <td><?= htmlspecialchars($task['last_run']) ?></td>
+                                        <td><?= htmlspecialchars($task['next_run']) ?></td>
+                                        <td>
+                                            <?php if ($task['status'] === 'success'): ?>
+                                                <span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>Success</span>
+                                            <?php elseif ($task['status'] === 'failed'): ?>
+                                                <span class="badge bg-danger" title="<?= htmlspecialchars($task['error_message']) ?>"><i class="fa-solid fa-triangle-exclamation me-1"></i>Failed</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-info"><?= htmlspecialchars($task['status']) ?></span>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
     </div>
 
     <!-- Right Column: System Audits & Config -->
@@ -151,6 +220,10 @@ $activeCount = count($pluginManager->getActivePlugins());
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <span>Active Modules</span>
                     <span class="badge bg-success"><?= $activeCount ?></span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span>Sandboxed Tasks</span>
+                    <span class="badge bg-warning text-dark"><?= count($scheduler->getRegisteredTasks()) ?></span>
                 </div>
                 <div class="d-flex justify-content-between align-items-center">
                     <span>Database Engine</span>
