@@ -7,16 +7,19 @@ An elegant, extensible, enterprise-grade PHP/MySQL modular portal framework. Dev
 ## Table of Contents
 1. [Architecture Overview](#architecture-overview)
 2. [Installation & Setup](#installation--setup)
-3. [Developing Plugins / Modules](#developing-plugins--modules)
+3. [Core Global Variables Reference](#core-global-variables-reference)
+4. [Developing Plugins / Modules](#developing-plugins--modules)
    - [Directory Structure](#directory-structure)
    - [Plugin Headers](#plugin-headers)
    - [Hook System (Actions & Filters)](#hook-system-actions--filters)
    - [Extensible Route Handlers](#extensible-route-handlers)
-   - [Database Isolation & prefixing](#database-isolation--prefixing)
+   - [Dynamic Home Screen Widgets](#dynamic-home-screen-widgets)
+   - [Inter-Plugin Exposed Services](#inter-plugin-exposed-services)
+   - [Database Isolation & Prefixing](#database-isolation--prefixing)
    - [Task Scheduler API](#task-scheduler-api)
    - [Permission and Role Checks](#permission-and-role-checks)
-4. [Sample Plugin Walkthrough](#sample-plugin-walkthrough)
-5. [Administrative Interfaces](#administrative-interfaces)
+5. [Sample Plugin Walkthrough](#sample-plugin-walkthrough)
+6. [Administrative Interfaces](#administrative-interfaces)
 
 ---
 
@@ -64,6 +67,19 @@ Key components:
 
 3. **Verify Core Routing**
    Deploy on any standard web-server (Apache, Nginx, or PHP CLI built-in server).
+
+---
+
+## Core Global Variables Reference
+
+The following global components and variables are loaded and made available to plugins at runtime:
+
+- **`$pluginManager`**: Global reference to the singleton `PluginManager` instance. Used to bind hooks, register services, and define custom pages.
+- **`$auth`**: Global reference to the `Auth` instance. Used to check user session variables.
+- **`$_SESSION['user_id']`**: Contains the integer Primary Key ID of the currently logged-in user session.
+- **`$_SESSION['user']`**: Array containing authenticated user details (`azure_oid`, `email`, `name`, `groups`).
+- **`$_SESSION['roles']`**: Array containing mapped RBAC active roles.
+- **`$_SESSION['permissions']`**: Array containing active granted permissions.
 
 ---
 
@@ -151,7 +167,58 @@ To visit this view, load `index.php?route=my_custom_view` in your browser.
 
 ---
 
-### Database Isolation & prefixing
+### Dynamic Home Screen Widgets
+
+Plugins can render highly stylized, dynamic home screen dashboard widget cards. The framework automatically passes a current authenticated user's metadata context array to the hook:
+
+```php
+PluginManager::getInstance()->addAction('index_dashboard_widgets', function($userContext) {
+    // Renders per-user customized contextual statistics or welcomes
+    ?>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-start border-5 border-primary">
+            <div class="card-body">
+                <h6 class="fw-bold">Welcome back, <?= htmlspecialchars($userContext['display_name']) ?>!</h6>
+                <p class="small text-muted mb-0">Your privilege level: <?= implode(', ', $userContext['roles']) ?></p>
+            </div>
+        </div>
+    </div>
+    <?php
+});
+```
+
+---
+
+### Inter-Plugin Exposed Services
+
+Plugins can expose internal helper functions or processed data models to sibling modules dynamically. The framework securely matches call contexts, ensuring that **all inter-plugin service calls run safely inside the active user session context**.
+
+* **Register a Service Capability (from Plugin A)**:
+  ```php
+  PluginManager::getInstance()->registerService(
+      'fetch_sales_report', // Service function key identifier
+      function($month) {
+          // Callback execution safely sandboxed
+          return ['month' => $month, 'sales' => 14000];
+      },
+      'plugin-a' // Plugin slug
+  );
+  ```
+
+* **Call a Sibling Plugin Service (from Plugin B)**:
+  ```php
+  try {
+      $data = PluginManager::getInstance()->callService('fetch_sales_report', 'October');
+      echo "October sales: " . $data['sales'];
+  } catch (Exception $e) {
+      // Handles cases where the sibling plugin is inactive or throws exceptions
+      echo "Failed to invoke service: " . $e->getMessage();
+  }
+  ```
+
+---
+
+### Database Isolation & Prefixing
 
 To ensure plugins can use the Database for their specific needs without colliding with or breaking the core, the framework exposes `PluginDatabase.php`.
 

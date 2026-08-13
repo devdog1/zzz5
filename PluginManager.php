@@ -8,6 +8,7 @@ class PluginManager
     private $actions = [];
     private $filters = [];
     private $routes = [];
+    private $services = []; // Inter-Plugin Shared Service Registry
     private $activePlugins = [];
     private $pluginMeta = [];
 
@@ -46,7 +47,7 @@ class PluginManager
 
         foreach ($priorities as $priority => $callbacks) {
             foreach ($callbacks as $callback) {
-                // SANDBOX SHIELD: Wrap each plugin hook execution in try/catch to avoid one bad plugin crashing others or breaking core platform.
+                // SANDBOX SHIELD: Wrap each plugin hook execution in try/catch
                 try {
                     call_user_func_array($callback, $arg);
                 } catch (Throwable $t) {
@@ -82,7 +83,7 @@ class PluginManager
 
         foreach ($priorities as $priority => $callbacks) {
             foreach ($callbacks as $callback) {
-                // SANDBOX SHIELD: Wrap each filter hook execution in try/catch so if a plugin filter throws, we fall back to returning the current state instead of crashing.
+                // SANDBOX SHIELD: Wrap each filter hook execution in try/catch
                 try {
                     $value = call_user_func_array($callback, array_merge([$value], $arg));
                 } catch (Throwable $t) {
@@ -96,6 +97,54 @@ class PluginManager
         }
 
         return $value;
+    }
+
+    /* =========================================================
+     * INTER-PLUGIN EXPOSED SERVICES & FUNCTIONS
+     * ========================================================= */
+
+    /**
+     * Expose a function or complete service capability to other plugins securely,
+     * maintaining active user session/context verification.
+     */
+    public function registerService($service_name, $callback, $plugin_slug)
+    {
+        $this->services[$service_name] = [
+            'callback' => $callback,
+            'plugin_slug' => $plugin_slug
+        ];
+    }
+
+    /**
+     * Call an exposed function or service registered by another plugin.
+     * Guarantees active user authentication context during cross-plugin communication.
+     */
+    public function callService($service_name, ...$args)
+    {
+        if (!isset($this->services[$service_name])) {
+            throw new Exception("Service/Function '{$service_name}' is not registered or available.");
+        }
+
+        $service = $this->services[$service_name];
+
+        // Ensure the owner plugin is active before running
+        if (!$this->isPluginActive($service['plugin_slug'])) {
+            throw new Exception("The module '{$service['plugin_slug']}' registering service '{$service_name}' is currently deactivated.");
+        }
+
+        // Context check: Enforce that user session context is active during execution
+        if (session_status() === PHP_SESSION_NONE || !isset($_SESSION['user_id'])) {
+            throw new Exception("Security context violation: An active user session is required to invoke cross-plugin services.");
+        }
+
+        // Execute inside try/catch sandbox
+        try {
+            return call_user_func_array($service['callback'], $args);
+        } catch (Throwable $t) {
+            $error_msg = "Error during cross-plugin service execution [{$service_name}]: " . $t->getMessage();
+            error_log($error_msg);
+            throw new Exception($error_msg);
+        }
     }
 
     /* =========================================================
@@ -140,7 +189,6 @@ class PluginManager
             $stmt = $db->query("SELECT plugin_slug FROM active_plugins");
             $this->activePlugins = $stmt->fetchAll(PDO::FETCH_COLUMN);
         } catch (Exception $e) {
-            // Silence if DB is not set up yet
             $this->activePlugins = [];
         }
     }
@@ -253,7 +301,7 @@ class PluginManager
         foreach ($this->activePlugins as $slug) {
             $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
             if (file_exists($pluginFile)) {
-                // Wrap plugin booting / inclusion so parsing / run runtime failures do not break index page
+                // Wrap plugin booting to ensure faulty plugins don't break loading
                 try {
                     require_once $pluginFile;
                 } catch (Throwable $t) {

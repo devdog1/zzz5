@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Sample Manager
-Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, and hooks inside the Base Framework.
-Version: 1.2.0
+Description: A sample plugin showing how to register custom settings, custom route, navigation tab, background tasks, widgets, and shared inter-plugin services inside the Base Framework.
+Version: 1.3.0
 Author: Framework Developers
 */
 
@@ -52,7 +52,7 @@ PluginManager::getInstance()->registerRoute('sample_manager_dashboard', function
         <div class="alert alert-success"><i class="fa-solid fa-circle-check me-1"></i> <?= htmlspecialchars($msg) ?></div>
     <?php endif; ?>
 
-    <div class="row">
+    <div class="row text-start">
         <div class="col-lg-6">
             <div class="card shadow-sm">
                 <div class="card-header bg-dark text-white">
@@ -110,3 +110,45 @@ Scheduler::getInstance()->registerTask(
     300, // run once every 5 minutes
     'sample-manager'
 );
+
+// 5. Expose inter-plugin capabilities / service API
+PluginManager::getInstance()->registerService(
+    'sample_fetch_system_status',
+    function($arg1) {
+        // Keeps execution context under active session scope. Returns custom array payload
+        return [
+            'status' => 'online',
+            'token_configured' => get_setting('sample_manager_api_token') ? true : false,
+            'argument_passed' => $arg1,
+            'queried_at' => date('Y-m-d H:i:s')
+        ];
+    },
+    'sample-manager'
+);
+
+// 6. Hook to register a dynamic, user-contextual index dashboard widget card
+PluginManager::getInstance()->addAction('index_dashboard_widgets', function($userContext) {
+    // Custom user contextual details displayed on Home screen dynamically
+    $roles_str = implode(', ', array_map('ucfirst', $userContext['roles'] ?? []));
+    ?>
+    <div class="col-md-6 col-lg-4">
+        <div class="card bg-gradient shadow-sm border-start border-5 border-info text-start">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="bg-light rounded-circle p-2 text-center me-3" style="width: 45px; height: 45px;">
+                        <i class="fa-solid fa-id-card-clip text-info fs-4"></i>
+                    </div>
+                    <div>
+                        <h6 class="card-title fw-bold mb-0 text-dark">User Context Widget</h6>
+                        <small class="text-muted">Registered by Sample Plugin</small>
+                    </div>
+                </div>
+                <hr class="my-2">
+                <p class="card-text small mb-1"><strong>Hello,</strong> <?= htmlspecialchars($userContext['display_name']) ?>!</p>
+                <p class="card-text small mb-1"><strong>Active Privilege Roles:</strong> <code class="text-secondary"><?= htmlspecialchars($roles_str) ?></code></p>
+                <p class="card-text small mb-0"><strong>Your Login ID:</strong> <code><?= htmlspecialchars($userContext['username']) ?></code></p>
+            </div>
+        </div>
+    </div>
+    <?php
+});

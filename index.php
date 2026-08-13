@@ -24,6 +24,15 @@ require_once __DIR__ . '/header.php';
 
 $scheduler = Scheduler::getInstance();
 
+// Fetch current user details as dynamic widget context
+$currentUserContext = [
+    'id' => $_SESSION['user_id'] ?? null,
+    'username' => $_SESSION['user']['email'] ?? '',
+    'display_name' => $_SESSION['user']['name'] ?? 'User',
+    'roles' => isset($_SESSION['roles']) ? array_keys($_SESSION['roles']) : [],
+    'permissions' => isset($_SESSION['permissions']) ? array_keys($_SESSION['permissions']) : []
+];
+
 // Handle Action activation/deactivations or Manual Cron Trigger
 $msg = '';
 $err = '';
@@ -84,6 +93,14 @@ $activeCount = count($pluginManager->getActivePlugins());
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 <?php endif; ?>
+
+<!-- 1. Extensible Dashboard Widget Hook (Per-User Contextual Widgets) -->
+<div class="row mb-4">
+    <?php
+    // Passes the contextual user session object so widgets draw customized, user-specific data
+    $pluginManager->doAction('index_dashboard_widgets', $currentUserContext);
+    ?>
+</div>
 
 <div class="row">
     <!-- Left Column: Plugin Manager & Background Scheduler -->
