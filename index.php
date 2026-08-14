@@ -1,5 +1,5 @@
 <?php
-// index.php - Pure Portal Dashboard Home Page
+// index.php - Streamlined Portal Dashboard Home Page
 require_once __DIR__ . '/functions.php';
 
 // Check if we are executing a custom plugin route
@@ -35,7 +35,7 @@ $currentUserContext = [
 ?>
 
 <div class="row mb-4">
-    <div class="col-md-8">
+    <div class="col-md-8 text-start">
         <h1 class="h2"><i class="fa-solid fa-gauge-high text-primary me-2"></i>Core Dashboard</h1>
         <p class="text-muted">Welcome to your Portal Homepage. Below are active dynamic widgets, diagnostic indicators, and audits.</p>
     </div>
@@ -52,28 +52,35 @@ $currentUserContext = [
     ?>
 </div>
 
-<div class="row">
-    <!-- Platform Quick Overview -->
+<div class="row text-start">
+    <!-- Active Plugins list panel -->
     <div class="col-lg-8">
-        <div class="card shadow-sm border-start border-5 border-primary mb-4 p-4 text-start">
-            <h4 class="fw-bold text-dark"><i class="fa-solid fa-cubes text-info me-2"></i>Enterprise Pluggable Portal</h4>
-            <p class="text-muted">This portal features a WordPress-inspired event broker engine, ensuring core platforms are detached from feature modules. You can extend, replace, or customize routes, themes, and schedulers seamlessly.</p>
-            <div class="mt-2">
-                <?php if (has_permission('manage_plugins')): ?>
-                    <a href="admin-plugins.php" class="btn btn-sm btn-primary">
-                        <i class="fa-solid fa-puzzle-piece me-1"></i>Configure Active Modules
-                    </a>
-                <?php endif; ?>
-                <?php if (has_permission('manage_settings')): ?>
-                    <a href="admin-users.php" class="btn btn-sm btn-outline-secondary ms-1">
-                        <i class="fa-solid fa-users me-1"></i>Manage RBAC Mappings
-                    </a>
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white"><i class="fa-solid fa-puzzle-piece me-2"></i>Active Feature Modules</div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">All portal features are dynamically served by independent feature packages. Active modules are monitored below:</p>
+                <?php if (empty($activePluginsList)): ?>
+                    <div class="alert alert-light border small text-center mb-0">No dynamic feature modules are currently enabled on your portal.</div>
+                <?php else: ?>
+                    <div class="row">
+                        <?php foreach ($activePluginsList as $active_slug): ?>
+                            <div class="col-md-6 mb-3">
+                                <div class="p-3 bg-light rounded border border-start border-3 border-success d-flex align-items-center justify-content-between">
+                                    <div>
+                                        <h6 class="fw-bold mb-0 text-dark"><?= htmlspecialchars(ucwords(str_replace('-', ' ', $active_slug))) ?></h6>
+                                        <small class="text-muted font-monospace">slug: <?= htmlspecialchars($active_slug) ?></small>
+                                    </div>
+                                    <span class="badge bg-success small"><i class="fa-solid fa-circle-check me-1"></i>Running</span>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
                 <?php endif; ?>
             </div>
         </div>
     </div>
 
-    <!-- Right Column: System Audits & Config -->
+    <!-- Right Column: Quick Stats -->
     <div class="col-lg-4">
         <!-- Quick Stats -->
         <div class="card mb-4 shadow-sm border-info">
@@ -93,32 +100,6 @@ $currentUserContext = [
                     <span>Database Engine</span>
                     <span class="badge bg-dark">MySQL/PDO</span>
                 </div>
-            </div>
-        </div>
-
-        <!-- Recent Audit Logs -->
-        <div class="card shadow-sm">
-            <div class="card-header bg-white">
-                <i class="fa-solid fa-receipt me-2 text-primary"></i>Recent Action Audit Trail
-            </div>
-            <div class="card-body p-0">
-                <?php $logs = get_audit_logs(10); ?>
-                <?php if (empty($logs)): ?>
-                    <p class="text-muted p-3 mb-0">No actions recorded in audit trail yet.</p>
-                <?php else: ?>
-                    <div class="list-group list-group-flush small" style="max-height: 350px; overflow-y: auto;">
-                        <?php foreach ($logs as $log): ?>
-                            <div class="list-group-item">
-                                <div class="d-flex w-100 justify-content-between">
-                                    <h6 class="mb-1 fw-bold"><?= htmlspecialchars($log['action']) ?></h6>
-                                    <small class="text-muted"><?= date('H:i:s', strtotime($log['timestamp'])) ?></small>
-                                </div>
-                                <p class="mb-1 text-muted fs-7"><?= htmlspecialchars(substr($log['details'], 0, 80)) ?>...</p>
-                                <small class="text-muted">By: <?= htmlspecialchars($log['display_name'] ?? $log['username'] ?? 'System') ?></small>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
             </div>
         </div>
     </div>
