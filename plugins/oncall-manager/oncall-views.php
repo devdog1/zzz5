@@ -464,7 +464,7 @@ $pm->registerRoute('oncall_overrides', function () {
 
 
 /* =========================================================
- * VIEW 4: DEPARTMENTS MANAGER (oncall_departments)
+ * VIEW 4: DEPARTMENTS & ROTATIONS MANAGER (oncall_departments)
  * ========================================================= */
 $pm->registerRoute('oncall_departments', function () {
     if (!has_permission('oncall_manager_manage_schedules')) {
@@ -475,7 +475,7 @@ $pm->registerRoute('oncall_departments', function () {
     $msg = '';
     $err = '';
 
-    // Handle Department Actions (Create, Delete, update_members)
+    // Handle Department Actions (Create, Delete, update_members, save_zabbix_groups)
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         validate_csrf();
         $action = $_POST['action'] ?? '';
@@ -491,6 +491,14 @@ $pm->registerRoute('oncall_departments', function () {
                 $selected_users = $_POST['members'] ?? [];
                 oncall_save_department_users($dept_id, $selected_users);
                 $msg = "Department active membership roster updated!";
+            } elseif ($action === 'save_zabbix_groups') {
+                $dept_id = (int)$_POST['department_id'];
+                $groups_raw = trim($_POST['zabbix_groups'] ?? '');
+
+                // Parse comma-separated list of group IDs
+                $group_ids = array_map('intval', array_filter(array_map('trim', explode(',', $groups_raw))));
+                oncall_save_department_zabbix_groups($dept_id, $group_ids);
+                $msg = "Zabbix User Groups associations saved successfully for this department!";
             } elseif ($action === 'delete') {
                 $dept_id = (int)$_POST['department_id'];
                 oncall_delete_department($dept_id);
@@ -507,7 +515,7 @@ $pm->registerRoute('oncall_departments', function () {
     <div class="row mb-4 text-start">
         <div class="col-md-12">
             <h2><i class="fa-solid fa-sitemap text-primary me-2"></i>Configure Departments</h2>
-            <p class="text-muted">Create support departments, toggle NOC modes, and manage rotational member roster pools.</p>
+            <p class="text-muted">Create support departments, toggle NOC modes, manage rotational member pools, and map one or more target Zabbix group IDs.</p>
         </div>
     </div>
 
@@ -533,13 +541,15 @@ $pm->registerRoute('oncall_departments', function () {
                                     <tr>
                                         <th>Dept Name</th>
                                         <th>Manager</th>
-                                        <th>Roster Pool</th>
+                                        <th>Zabbix Groups</th>
                                         <th class="text-end">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($departments as $dept):
                                         $members = oncall_get_department_users($dept['id']);
+                                        $associated_z_groups = oncall_get_department_zabbix_groups($dept['id']);
+                                        $groups_badge = !empty($associated_z_groups) ? implode(', ', $associated_z_groups) : 'None';
                                     ?>
                                         <tr>
                                             <td>
@@ -550,11 +560,13 @@ $pm->registerRoute('oncall_departments', function () {
                                             </td>
                                             <td><?= htmlspecialchars($dept['manager_name'] ?? 'None Assigned') ?></td>
                                             <td>
-                                                <span class="badge bg-secondary"><?= count($members) ?> Users Joined</span>
+                                                <span class="badge bg-secondary font-monospace"><?= htmlspecialchars($groups_badge) ?></span>
                                             </td>
                                             <td class="text-end">
                                                 <!-- Edit Members Modal trigger -->
-                                                <button type="button" class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#membersModal<?= $dept['id'] ?>">Roster</button>
+                                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#membersModal<?= $dept['id'] ?>">Roster</button>
+                                                <!-- Edit Zabbix Groups trigger -->
+                                                <button type="button" class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#zabbixModal<?= $dept['id'] ?>">Zabbix</button>
                                                 <!-- Delete button -->
                                                 <form method="POST" class="d-inline-block" onsubmit="return confirm('Are you sure you want to delete this department?');">
                                                     <?php csrf_field(); ?>
@@ -603,6 +615,34 @@ $pm->registerRoute('oncall_departments', function () {
                                                         <div class="modal-footer">
                                                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                                                             <button type="submit" class="btn btn-primary">Save Roster Pool</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- MODAL: Manage Associated Zabbix User Groups -->
+                                        <div class="modal fade" id="zabbixModal<?= $dept['id'] ?>" tabindex="-1">
+                                            <div class="modal-dialog">
+                                                <div class="modal-content">
+                                                    <div class="modal-header">
+                                                        <h5 class="modal-title">Associate Zabbix Groups: <?= htmlspecialchars($dept['name']) ?></h5>
+                                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                    </div>
+                                                    <form method="POST">
+                                                        <?php csrf_field(); ?>
+                                                        <input type="hidden" name="action" value="save_zabbix_groups">
+                                                        <input type="hidden" name="department_id" value="<?= $dept['id'] ?>">
+                                                        <div class="modal-body text-start">
+                                                            <div class="mb-3">
+                                                                <label class="form-label small fw-bold">Zabbix Group IDs (Comma-Separated)</label>
+                                                                <input type="text" name="zabbix_groups" class="form-control" value="<?= htmlspecialchars(implode(', ', $associated_z_groups)) ?>" placeholder="e.g. 12, 14, 18">
+                                                                <div class="form-text">Input one or more Zabbix User Group IDs. On-call rotations will automatically auto-assign active users to these groups, and remove old/expired users.</div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                            <button type="submit" class="btn btn-warning">Save Group IDs</button>
                                                         </div>
                                                     </form>
                                                 </div>

@@ -83,6 +83,13 @@ CREATE TABLE IF NOT EXISTS plug_oncall_manager_settings (
 CREATE TABLE IF NOT EXISTS plug_oncall_manager_zabbix_user_map (
     zabbix_userid BIGINT NOT NULL PRIMARY KEY,
     local_user_id INT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (local_user_id) REFERENCES users(id) ON DELETE CASCADE
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 10. Department Zabbix Groups table
+CREATE TABLE IF NOT EXISTS plug_oncall_manager_department_zabbix_groups (
+    department_id INT NOT NULL,
+    zabbix_usrgrp_id BIGINT NOT NULL,
+    last_oncall_userid BIGINT DEFAULT NULL,
+    PRIMARY KEY (department_id, zabbix_usrgrp_id)
 );

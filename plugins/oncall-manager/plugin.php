@@ -70,49 +70,72 @@ PluginManager::getInstance()->addFilter('theme_nav_links', function ($links) {
     return $links;
 });
 
-// 2. Register home screen active coverage widgets
+// 2. Register home screen active coverage and upcoming shifts widgets
 PluginManager::getInstance()->addAction('index_dashboard_widgets', function ($userContext) {
     $now = time();
     $departments = oncall_get_all_departments();
 
-    if (empty($departments)) {
-        return;
-    }
-
-    foreach ($departments as $dept) {
-        $current = oncall_get_current_on_call($dept['id'], $now);
-        $is_override = $current && $current['is_override'];
-        $border_class = $current ? ($is_override ? 'border-warning' : 'border-success') : 'border-danger';
-        ?>
-        <div class="col-md-6 col-lg-4 mb-3">
-            <div class="card shadow-sm border-start border-5 <?= $border_class ?> text-start">
-                <div class="card-body">
-                    <div class="d-flex w-100 justify-content-between align-items-center mb-2">
-                        <h6 class="fw-bold mb-0 text-primary"><?= htmlspecialchars($dept['name']) ?></h6>
-                        <?php if ($current): ?>
-                            <?php if ($is_override): ?>
-                                <span class="badge bg-warning text-dark small">Override Active</span>
+    // RENDER SECTION 1: Active Coverage status widgets inside its own identified space on the dashboard
+    if (!empty($departments)) {
+        echo '<div class="col-12 text-start mb-2 mt-2"><h5 class="fw-bold text-dark border-bottom pb-2"><i class="fa-solid fa-shield-halved text-success me-2"></i>Active Department On-Call Coverage</h5></div>';
+        foreach ($departments as $dept) {
+            $current = oncall_get_current_on_call($dept['id'], $now);
+            $is_override = $current && $current['is_override'];
+            $border_class = $current ? ($is_override ? 'border-warning' : 'border-success') : 'border-danger';
+            ?>
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card shadow-sm border-start border-5 <?= $border_class ?> text-start">
+                    <div class="card-body">
+                        <div class="d-flex w-100 justify-content-between align-items-center mb-2">
+                            <h6 class="fw-bold mb-0 text-primary"><?= htmlspecialchars($dept['name']) ?></h6>
+                            <?php if ($current): ?>
+                                <?php if ($is_override): ?>
+                                    <span class="badge bg-warning text-dark small">Override Active</span>
+                                <?php else: ?>
+                                    <span class="badge bg-success small">Active</span>
+                                <?php endif; ?>
                             <?php else: ?>
-                                <span class="badge bg-success small">Active</span>
+                                <span class="badge bg-danger small">No Coverage</span>
                             <?php endif; ?>
+                        </div>
+                        <?php if ($current): ?>
+                            <p class="small mb-1"><strong>On-Call:</strong> <?= htmlspecialchars($current['display_name'] ?? $current['username']) ?></p>
+                            <p class="text-muted small fs-7 mb-0"><i class="fa-solid fa-clock me-1"></i> Ends: <?= date('M d, H:i', $current['end']) ?></p>
                         <?php else: ?>
-                            <span class="badge bg-danger small">No Coverage</span>
+                            <p class="small text-danger mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i> No active rotations found.</p>
                         <?php endif; ?>
                     </div>
-                    <?php if ($current): ?>
-                        <p class="small mb-1"><strong>On-Call:</strong> <?= htmlspecialchars($current['display_name'] ?? $current['username']) ?></p>
-                        <p class="text-muted small fs-7 mb-0"><i class="fa-solid fa-clock me-1"></i> Ends: <?= date('M d, H:i', $current['end']) ?></p>
-                    <?php else: ?>
-                        <p class="small text-danger mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i> No active rotations found.</p>
-                    <?php endif; ?>
                 </div>
             </div>
-        </div>
-        <?php
+            <?php
+        }
+    }
+
+    // RENDER SECTION 2: Current user's upcoming shifts widget inside its own identified space on the dashboard
+    $userId = $userContext['id'];
+    if ($userId) {
+        $upcoming = oncall_get_upcoming_user_shifts($userId, 3);
+        if (!empty($upcoming)) {
+            echo '<div class="col-12 text-start mb-2 mt-3"><h5 class="fw-bold text-dark border-bottom pb-2"><i class="fa-solid fa-calendar-check text-info me-2"></i>Your Upcoming On-Call Shifts</h5></div>';
+            foreach ($upcoming as $sh) {
+                ?>
+                <div class="col-md-6 col-lg-4 mb-3">
+                    <div class="card shadow-sm border-start border-5 border-info text-start">
+                        <div class="card-body">
+                            <h6 class="fw-bold mb-1 text-info"><?= htmlspecialchars($sh['department_name']) ?></h6>
+                            <p class="small mb-1 text-muted">You are scheduled on-call for this department:</p>
+                            <p class="small mb-0 font-monospace text-dark"><strong>Start:</strong> <?= date('M d, H:i', strtotime($sh['start_time'])) ?></p>
+                            <p class="small mb-0 font-monospace text-dark"><strong>End:</strong> <?= date('M d, H:i', strtotime($sh['end_time'])) ?></p>
+                        </div>
+                    </div>
+                </div>
+                <?php
+            }
+        }
     }
 });
 
-// 3. Register background Cron Task syncs (Telephone Forward sync running once per hour, removed Zabbix direct MySQL DB, now uses API)
+// 3. Register background Cron Task syncs
 require_once __DIR__ . '/../../Scheduler.php';
 
 // Telephony forward sync callback task
@@ -128,6 +151,14 @@ Scheduler::getInstance()->registerTask(
     'zabbix_api_user_sync',
     'oncall_sync_zabbix_via_api',
     3600, // hourly
+    'oncall-manager'
+);
+
+// Zabbix User Group membership auto-assignment update task (runs every 5 minutes)
+Scheduler::getInstance()->registerTask(
+    'zabbix_group_auto_assign',
+    'oncall_sync_all_departments_zabbix_groups',
+    300, // every 5 minutes
     'oncall-manager'
 );
 
@@ -233,12 +264,21 @@ PluginManager::getInstance()->addAction('activate_plugin_oncall-manager', functi
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ");
 
+    // 10. Create Department Zabbix Groups table
+    $pdb->createTable('department_zabbix_groups', "
+        department_id INT NOT NULL,
+        zabbix_usrgrp_id BIGINT NOT NULL,
+        last_oncall_userid BIGINT DEFAULT NULL,
+        PRIMARY KEY (department_id, zabbix_usrgrp_id)
+    ");
+
     log_action('ON_CALL_MANAGER_ACTIVATION_SUCCESS', []);
 });
 
 // 5. Register Deactivation Hook (Drops dynamic tables safely)
 PluginManager::getInstance()->addAction('deactivate_plugin_oncall-manager', function () {
     $pdb = new PluginDatabase('oncall-manager');
+    $pdb->dropTable('department_zabbix_groups');
     $pdb->dropTable('zabbix_user_map');
     $pdb->dropTable('settings');
     $pdb->dropTable('commportal_accounts');

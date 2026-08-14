@@ -138,6 +138,36 @@ function oncall_save_department_users($department_id, $user_ids) {
 }
 
 /* =========================================================
+ * DEPARTMENT ZABBIX GROUP MAPPINGS
+ * ========================================================= */
+
+function oncall_get_department_zabbix_groups($department_id) {
+    $pdb = oncall_get_pdb();
+    $tb_zg = $pdb->getTableName('department_zabbix_groups');
+    $sql = "SELECT zabbix_usrgrp_id FROM {$tb_zg} WHERE department_id = ?";
+    return $pdb->query($sql, [$department_id])->fetchAll(PDO::FETCH_COLUMN);
+}
+
+function oncall_save_department_zabbix_groups($department_id, $zabbix_usrgrp_ids) {
+    $pdb = oncall_get_pdb();
+    $tb_zg = $pdb->getTableName('department_zabbix_groups');
+
+    $pdb->query("DELETE FROM {$tb_zg} WHERE department_id = ?", [$department_id]);
+
+    if (!empty($zabbix_usrgrp_ids)) {
+        $sql = "INSERT INTO {$tb_zg} (department_id, zabbix_usrgrp_id) VALUES (?, ?)";
+        foreach ($zabbix_usrgrp_ids as $grp_id) {
+            if (!empty($grp_id)) {
+                $pdb->query($sql, [$department_id, (int)$grp_id]);
+            }
+        }
+    }
+
+    log_action('ONCALL_UPDATE_DEPT_ZABBIX_GROUPS', ['department_id' => $department_id, 'groups' => $zabbix_usrgrp_ids]);
+    return true;
+}
+
+/* =========================================================
  * ROTATION SCHEDULE SLOTS GENERATOR
  * ========================================================= */
 
@@ -491,6 +521,23 @@ function oncall_get_current_on_call($department_id, $timestamp) {
     return null;
 }
 
+function oncall_get_upcoming_user_shifts($user_id, $limit = 5) {
+    $pdb = oncall_get_pdb();
+    $tb_slots = $pdb->getTableName('schedule_slots');
+    $tb_depts = $pdb->getTableName('departments');
+
+    // Fetch upcoming on-call shifts starting from now
+    $sql = "
+        SELECT s.*, d.name AS department_name
+        FROM {$tb_slots} s
+        JOIN {$tb_depts} d ON s.department_id = d.id
+        WHERE s.user_id = ? AND s.end_time >= NOW()
+        ORDER BY s.start_time ASC
+        LIMIT ?
+    ";
+    return $pdb->query($sql, [$user_id, $limit])->fetchAll();
+}
+
 /* =========================================================
  * SHIFT TRADES OPERATIONS
  * ========================================================= */
@@ -811,4 +858,101 @@ function oncall_sync_zabbix_via_api() {
 
     log_action('ON_CALL_ZABBIX_API_SYNC_SUCCESS', ['synced_users' => $synced_count]);
     return $synced_count;
+}
+
+/**
+ * Safe Zabbix API User Group assignment update trigger.
+ */
+function oncall_trigger_zabbix_user_group_update($usrgrp_id, $zabbix_userid) {
+    $api_url = oncall_get_setting('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php');
+    $api_token = oncall_get_setting('zabbix_api_token', '');
+
+    $payload = [
+        'jsonrpc' => '2.0',
+        'method' => 'usergroup.update',
+        'params' => [
+            'usrgrpid' => (string)$usrgrp_id,
+            'users' => [
+                ['userid' => (string)$zabbix_userid]
+            ]
+        ],
+        'id' => 1
+    ];
+
+    $headers = ["Content-Type: application/json"];
+    if (!empty($api_token)) {
+        $headers[] = "Authorization: Bearer " . $api_token;
+    }
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    $result = curl_exec($ch);
+    curl_close($ch);
+
+    log_action('ONCALL_ZABBIX_GROUP_UPDATE', [
+        'usrgrpid' => $usrgrp_id,
+        'userid' => $zabbix_userid,
+        'status' => $result !== false ? 'success' : 'failed'
+    ]);
+
+    return $result !== false;
+}
+
+/**
+ * Scans all departments to locate the currently active on-call user.
+ * Looks up their mapped Zabbix User ID and automatically triggers the Zabbix API user group auto-assignment updates.
+ */
+function oncall_sync_all_departments_zabbix_groups() {
+    $pdb = oncall_get_pdb();
+    $tb_zg = $pdb->getTableName('department_zabbix_groups');
+    $tb_map = $pdb->getTableName('zabbix_user_map');
+    $now = time();
+
+    // Fetch all department-group associations
+    $groups = $pdb->query("SELECT * FROM {$tb_zg}")->fetchAll();
+    if (empty($groups)) {
+        return;
+    }
+
+    foreach ($groups as $g) {
+        $dept_id = $g['department_id'];
+        $grp_id = $g['zabbix_usrgrp_id'];
+        $last_user = $g['last_oncall_userid'];
+
+        // Determine current active on-call person
+        $current = oncall_get_current_on_call($dept_id, $now);
+        if (!$current) {
+            continue;
+        }
+
+        $local_user_id = $current['user_id'];
+
+        // Retrieve mapped Zabbix User ID
+        $map = $pdb->query("SELECT zabbix_userid FROM {$tb_map} WHERE local_user_id = ?", [$local_user_id])->fetch();
+        if (!$map) {
+            // User does not have a mapped Zabbix ID, skip
+            continue;
+        }
+
+        $zabbix_userid = $map['zabbix_userid'];
+
+        // Check if the on-call person has changed for this group
+        if ($zabbix_userid != $last_user) {
+            // Trigger the API auto-assignment
+            $success = oncall_trigger_zabbix_user_group_update($grp_id, $zabbix_userid);
+            if ($success) {
+                // Update tracking status
+                $pdb->query("
+                    UPDATE {$tb_zg}
+                    SET last_oncall_userid = ?
+                    WHERE department_id = ? AND zabbix_usrgrp_id = ?
+                ", [$zabbix_userid, $dept_id, $grp_id]);
+            }
+        }
+    }
 }
