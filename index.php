@@ -2,20 +2,29 @@
 // index.php - Streamlined Portal Dashboard Home Page
 require_once __DIR__ . '/functions.php';
 
+// Redirect to login if user is not logged in
+require_login();
+
 // Check if we are executing a custom plugin route
 $route = $_GET['route'] ?? null;
 if ($route) {
-    // Start page buffer and include header
-    require_once __DIR__ . '/header.php';
-
-    // Attempt to handle custom route
+    // Buffer output so JSON/AJAX routes that call exit() can return raw JSON without HTML headers
+    ob_start();
     $handled = $pluginManager->handleRoute($route);
-    if (!$handled) {
-        echo '<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> No plugin found matching route: ' . htmlspecialchars($route) . '</div>';
-    }
+    $route_output = ob_get_clean();
 
-    require_once __DIR__ . '/footer.php';
-    exit;
+    if ($handled) {
+        // If route completed normally (did not call exit for raw JSON), wrap in theme templates
+        require_once __DIR__ . '/header.php';
+        echo $route_output;
+        require_once __DIR__ . '/footer.php';
+        exit;
+    } else {
+        require_once __DIR__ . '/header.php';
+        echo '<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i> No plugin found matching route: ' . htmlspecialchars($route) . '</div>';
+        require_once __DIR__ . '/footer.php';
+        exit;
+    }
 }
 
 // Otherwise, render Core Dashboard Portal Screen
