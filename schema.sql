@@ -27,6 +27,12 @@ CREATE TABLE IF NOT EXISTS roles (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Seed Initial Roles & Basic Permissions
+INSERT IGNORE INTO roles (id, role_name, description) VALUES
+(1, 'admin', 'Global Administrator with full rights'),
+(2, 'manager', 'Manager with limited administrative rights'),
+(3, 'user', 'Standard user');
+
 CREATE TABLE IF NOT EXISTS permissions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     permission_name VARCHAR(100) NOT NULL UNIQUE,
@@ -106,11 +112,15 @@ CREATE TABLE IF NOT EXISTS active_plugins (
     activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 6. Task Scheduler Tracking Table
+-- 6. Task Scheduler Tracking Table with Dynamic Overrides and Enablement
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
     task_key VARCHAR(150) NOT NULL PRIMARY KEY,
     plugin_slug VARCHAR(100) NOT NULL,
     interval_seconds INT NOT NULL,
+    is_enabled TINYINT(1) DEFAULT 1,
+    custom_interval_seconds INT DEFAULT NULL,
+    fixed_day_of_week INT DEFAULT NULL, -- 1=Monday, ..., 7=Sunday
+    fixed_time_of_day TIME DEFAULT NULL, -- HH:MM:SS
     last_run DATETIME DEFAULT NULL,
     next_run DATETIME DEFAULT NULL,
     status VARCHAR(50) DEFAULT 'idle',
@@ -118,11 +128,17 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Seed Initial Roles & Basic Permissions
-INSERT IGNORE INTO roles (id, role_name, description) VALUES
-(1, 'admin', 'Global Administrator with full rights'),
-(2, 'manager', 'Manager with limited administrative rights'),
-(3, 'user', 'Standard user');
+-- 7. Task Scheduler Historical Execution Logs Table with duration column
+CREATE TABLE IF NOT EXISTS scheduled_tasks_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    task_key VARCHAR(150) NOT NULL,
+    run_started DATETIME NOT NULL,
+    run_ended DATETIME DEFAULT NULL,
+    status VARCHAR(50) NOT NULL, -- 'running', 'success', 'failed'
+    duration_seconds DECIMAL(10, 4) DEFAULT 0.0000,
+    error_message TEXT DEFAULT NULL,
+    FOREIGN KEY (task_key) REFERENCES scheduled_tasks(task_key) ON DELETE CASCADE
+);
 
 INSERT IGNORE INTO permissions (id, permission_name, description) VALUES
 (1, 'manage_settings', 'Modify system and plugin settings'),

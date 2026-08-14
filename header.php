@@ -73,6 +73,11 @@ $site_name = get_setting('site_name', 'Framework Portal');
                             <i class="fa-solid fa-puzzle-piece me-1"></i> Modules & Plugins
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= ($current_page === 'admin-scheduler.php') ? 'active' : '' ?>" href="admin-scheduler.php">
+                            <i class="fa-solid fa-clock-rotate-left me-1 text-warning"></i> Task Scheduler
+                        </a>
+                    </li>
                 <?php endif; ?>
                 <?php if (has_permission('manage_settings')): ?>
                     <li class="nav-item">
