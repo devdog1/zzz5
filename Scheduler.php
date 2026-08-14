@@ -1,5 +1,5 @@
 <?php
-// Scheduler.php - Robust, Sandboxed Task Scheduler with Dynamic Schedule Overrides, Concurrency Lock, and Execution Logs
+// Scheduler.php - Robust, Sandboxed Parallel Task Scheduler with Concurrency Lock, and Execution Logs
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/PluginManager.php';
 
@@ -20,11 +20,6 @@ class Scheduler
 
     /**
      * Register a background task from a plugin safely.
-     *
-     * @param string $task_key Unique identifier for the task
-     * @param callable $callback The code to execute
-     * @param int $interval_seconds How frequently to run (e.g., 3600 for hourly)
-     * @param string $plugin_slug Owner plugin to allow clean tracking
      */
     public function registerTask($task_key, $callback, $interval_seconds = 3600, $plugin_slug = 'core')
     {
@@ -51,7 +46,8 @@ class Scheduler
     }
 
     /**
-     * Run all pending tasks, wrapped in try-catch sandboxes.
+     * Spawns independent parallel background processes for each pending due task
+     * so that execution of one task does not block or delay another.
      */
     public function runPendingTasks()
     {
@@ -79,14 +75,13 @@ class Scheduler
                     continue;
                 }
 
-                // CONCURRENCY LOCK: If task is already running, verify if it is a stale lock
+                // CONCURRENCY LOCK: Prevent duplicate concurrent runs of the exact same task
                 if (isset($state['status']) && $state['status'] === 'running') {
                     $last_update = strtotime($state['updated_at']);
                     $ten_minutes_ago = time() - 600;
 
                     if ($last_update > $ten_minutes_ago) {
                         // Skip: Task is currently executing in another process/concurrency lock active!
-                        error_log("Task [{$scoped_key}] is currently running. Skipping duplicate parallel execution.");
                         continue;
                     } else {
                         // Recover stale lock: Task has been running for > 10 mins. Assume crashed/stale.
@@ -145,7 +140,7 @@ class Scheduler
                     continue;
                 }
 
-                // Update state to "Running"
+                // Update state to "running" immediately to acquire lock
                 $next_run_timestamp = $now + $interval;
 
                 // If using fixed scheduling, map next_run accordingly
@@ -155,71 +150,116 @@ class Scheduler
 
                 $stmt = $db->prepare("
                     UPDATE scheduled_tasks
-                    SET last_run = NOW(),
+                    SET status = 'running',
                         next_run = FROM_UNIXTIME(?),
-                        status = 'running',
                         error_message = NULL
                     WHERE task_key = ?
                 ");
                 $stmt->execute([$next_run_timestamp, $scoped_key]);
 
-                // Track microtime start
-                $start_time = microtime(true);
+                // ASYNCHRONOUS PARALLEL PROCESS SPAWNING:
+                // Spawns an independent background sub-process of cron.php to run this task callback
+                // in parallel. Since it's run in the background, this loop proceeds immediately
+                // without waiting for the task to finish.
+                $php_bin = PHP_BINARY ? PHP_BINARY : 'php';
+                $script_path = __DIR__ . '/cron.php';
 
-                // Insert into historical logs with 'running' status
-                $stmt_log = $db->prepare("
-                    INSERT INTO scheduled_tasks_logs (task_key, run_started, status)
-                    VALUES (?, NOW(), 'running')
-                ");
-                $stmt_log->execute([$scoped_key]);
-                $log_id = $db->lastInsertId();
-
-                // Sandbox execution of callback
-                $success = true;
-                $error_msg = null;
-
-                try {
-                    call_user_func($task['callback']);
-                } catch (Throwable $t) {
-                    $success = false;
-                    $error_msg = $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
-                    error_log("Scheduler Error in task [{$scoped_key}]: " . $error_msg);
-
-                    if (function_exists('log_action')) {
-                        log_action('SCHEDULER_TASK_CRASH', [
-                            'task_key' => $task['key'],
-                            'plugin_slug' => $task['plugin'],
-                            'error' => $error_msg
-                        ]);
-                    }
+                if (strpos(strtolower(PHP_OS), 'win') === 0) {
+                    // Windows background command spawning
+                    $cmd = "start /B {$php_bin} " . escapeshellarg($script_path) . " " . escapeshellarg("--task={$scoped_key}") . " > NUL 2>&1";
+                    pclose(popen($cmd, "r"));
+                } else {
+                    // Unix/Linux background command spawning (using '&' operator)
+                    $cmd = "{$php_bin} " . escapeshellarg($script_path) . " " . escapeshellarg("--task={$scoped_key}") . " > /dev/null 2>&1 &";
+                    exec($cmd);
                 }
 
-                // Calculate duration seconds
-                $duration = round(microtime(true) - $start_time, 4);
-
-                // Update final state status
-                $status = $success ? 'success' : 'failed';
-                $stmt = $db->prepare("
-                    UPDATE scheduled_tasks
-                    SET status = ?, error_message = ?
-                    WHERE task_key = ?
-                ");
-                $stmt->execute([$status, $error_msg, $scoped_key]);
-
-                // Update historical logs row with final metrics
-                $stmt_log_update = $db->prepare("
-                    UPDATE scheduled_tasks_logs
-                    SET run_ended = NOW(),
-                        status = ?,
-                        duration_seconds = ?,
-                        error_message = ?
-                    WHERE id = ?
-                ");
-                $stmt_log_update->execute([$status, $duration, $error_msg, $log_id]);
+                error_log("Asynchronously spawned background sub-process for task: [{$scoped_key}]");
 
             } catch (Exception $e) {
                 error_log("Database tracking failure in scheduler loop: " . $e->getMessage());
             }
+        }
+    }
+
+    /**
+     * Executes a single task's callback directly within the current process context.
+     * This is invoked by asynchronous spawned background subprocesses.
+     */
+    public function executeSingleTask($scoped_key)
+    {
+        if (!isset($this->tasks[$scoped_key])) {
+            throw new Exception("Task [{$scoped_key}] is not registered.");
+        }
+
+        $task = $this->tasks[$scoped_key];
+        $db = get_db_connection();
+
+        try {
+            // Update last run timestamp
+            $stmt = $db->prepare("
+                UPDATE scheduled_tasks
+                SET last_run = NOW()
+                WHERE task_key = ?
+            ");
+            $stmt->execute([$scoped_key]);
+
+            // Track microtime start
+            $start_time = microtime(true);
+
+            // Log execution initiation
+            $stmt_log = $db->prepare("
+                INSERT INTO scheduled_tasks_logs (task_key, run_started, status)
+                VALUES (?, NOW(), 'running')
+            ");
+            $stmt_log->execute([$scoped_key]);
+            $log_id = $db->lastInsertId();
+
+            // Run callback inside sandbox shield
+            $success = true;
+            $error_msg = null;
+
+            try {
+                call_user_func($task['callback']);
+            } catch (Throwable $t) {
+                $success = false;
+                $error_msg = $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
+                error_log("Scheduler Error in task [{$scoped_key}]: " . $error_msg);
+
+                if (function_exists('log_action')) {
+                    log_action('SCHEDULER_TASK_CRASH', [
+                        'task_key' => $task['key'],
+                        'plugin_slug' => $task['plugin'],
+                        'error' => $error_msg
+                    ]);
+                }
+            }
+
+            // Calculate precise execution duration
+            $duration = round(microtime(true) - $start_time, 4);
+            $status = $success ? 'success' : 'failed';
+
+            // Complete task tracking lock state
+            $stmt = $db->prepare("
+                UPDATE scheduled_tasks
+                SET status = ?, error_message = ?
+                WHERE task_key = ?
+            ");
+            $stmt->execute([$status, $error_msg, $scoped_key]);
+
+            // Complete historical logs row with metrics
+            $stmt_log_update = $db->prepare("
+                UPDATE scheduled_tasks_logs
+                SET run_ended = NOW(),
+                    status = ?,
+                    duration_seconds = ?,
+                    error_message = ?
+                WHERE id = ?
+            ");
+            $stmt_log_update->execute([$status, $duration, $error_msg, $log_id]);
+
+        } catch (Exception $e) {
+            error_log("Failed executing single task [{$scoped_key}]: " . $e->getMessage());
         }
     }
 
