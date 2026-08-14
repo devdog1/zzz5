@@ -35,8 +35,8 @@ class PluginDatabase
 
         // Identify mutating statements
         $is_mutation = false;
-        foreach (['INSERT INTO', 'UPDATE', 'DELETE FROM', 'DROP TABLE', 'ALTER TABLE', 'TRUNCATE'] as $keyword) {
-            if (strpos($upper_sql, $keyword) !== false) {
+        foreach (['INSERT ', 'UPDATE ', 'DELETE ', 'DROP ', 'ALTER ', 'TRUNCATE '] as $keyword) {
+            if (strpos($upper_sql, $keyword) === 0 || strpos($upper_sql, ' ' . $keyword) !== false) {
                 $is_mutation = true;
                 break;
             }
@@ -46,20 +46,45 @@ class PluginDatabase
             return; // Read-only SELECT queries are allowed
         }
 
-        // Extract target table names being mutated
-        preg_match_all('/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|ALTER\s+TABLE|TRUNCATE\s+(?:TABLE)?)\s+[`\']?([a-zA-Z0-9_]+)[`\']?/i', $clean_sql, $matches);
+        // Strip ON DUPLICATE KEY UPDATE clause to avoid matching column names after UPDATE in ON DUPLICATE KEY
+        $sql_without_odku = preg_replace('/ON\s+DUPLICATE\s+KEY\s+UPDATE\s+.*$/i', '', $clean_sql);
 
-        if (!empty($matches[1])) {
-            foreach ($matches[1] as $target_table) {
-                // Ignore SQL keywords that might be caught
-                if (in_array(strtoupper($target_table), ['SET', 'SELECT', 'WHERE', 'JOIN', 'TABLE', 'IF', 'EXISTS'])) {
-                    continue;
-                }
+        $target_tables = [];
 
-                // Target table MUST start with $this->prefix
-                if (strpos($target_table, $this->prefix) !== 0) {
-                    throw new Exception("Security Violation: Module '{$this->plugin_slug}' attempted unauthorized modification on table '{$target_table}'. Modules can only modify tables matching their own prefix '{$this->prefix}'.");
-                }
+        // 1. INSERT INTO <table>
+        if (preg_match('/INSERT\s+(?:INTO\s+)?[`\']?([a-zA-Z0-9_]+)[`\']?/i', $sql_without_odku, $m)) {
+            $target_tables[] = $m[1];
+        }
+
+        // 2. UPDATE <table> SET
+        if (preg_match('/UPDATE\s+[`\']?([a-zA-Z0-9_]+)[`\']?\s+SET/i', $sql_without_odku, $m)) {
+            $target_tables[] = $m[1];
+        }
+
+        // 3. DELETE FROM <table>
+        if (preg_match('/DELETE\s+FROM\s+[`\']?([a-zA-Z0-9_]+)[`\']?/i', $sql_without_odku, $m)) {
+            $target_tables[] = $m[1];
+        }
+
+        // 4. DROP TABLE [IF EXISTS] <table>
+        if (preg_match('/DROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+[`\']?([a-zA-Z0-9_]+)[`\']?/i', $sql_without_odku, $m)) {
+            $target_tables[] = $m[1];
+        }
+
+        // 5. ALTER TABLE <table>
+        if (preg_match('/ALTER\s+TABLE\s+[`\']?([a-zA-Z0-9_]+)[`\']?/i', $sql_without_odku, $m)) {
+            $target_tables[] = $m[1];
+        }
+
+        // 6. TRUNCATE [TABLE] <table>
+        if (preg_match('/TRUNCATE\s+(?:TABLE\s+)?[`\']?([a-zA-Z0-9_]+)[`\']?/i', $sql_without_odku, $m)) {
+            $target_tables[] = $m[1];
+        }
+
+        foreach ($target_tables as $target_table) {
+            // Target table MUST start with $this->prefix
+            if (strpos($target_table, $this->prefix) !== 0) {
+                throw new Exception("Security Violation: Module '{$this->plugin_slug}' attempted unauthorized modification on table '{$target_table}'. Modules can only modify tables matching their own prefix '{$this->prefix}'.");
             }
         }
     }
