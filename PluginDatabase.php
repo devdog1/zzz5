@@ -25,25 +25,53 @@ class PluginDatabase
     }
 
     /**
+     * Inspects mutating SQL queries to enforce strict table isolation, preventing plugins
+     * from modifying core base tables or tables belonging to other plugins.
+     */
+    private function validateMutationAccess($sql)
+    {
+        $clean_sql = trim(preg_replace('/\s+/', ' ', $sql));
+        $upper_sql = strtoupper($clean_sql);
+
+        // Identify mutating statements
+        $is_mutation = false;
+        foreach (['INSERT INTO', 'UPDATE', 'DELETE FROM', 'DROP TABLE', 'ALTER TABLE', 'TRUNCATE'] as $keyword) {
+            if (strpos($upper_sql, $keyword) !== false) {
+                $is_mutation = true;
+                break;
+            }
+        }
+
+        if (!$is_mutation) {
+            return; // Read-only SELECT queries are allowed
+        }
+
+        // Extract target table names being mutated
+        preg_match_all('/(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|ALTER\s+TABLE|TRUNCATE\s+(?:TABLE)?)\s+[`\']?([a-zA-Z0-9_]+)[`\']?/i', $clean_sql, $matches);
+
+        if (!empty($matches[1])) {
+            foreach ($matches[1] as $target_table) {
+                // Ignore SQL keywords that might be caught
+                if (in_array(strtoupper($target_table), ['SET', 'SELECT', 'WHERE', 'JOIN', 'TABLE', 'IF', 'EXISTS'])) {
+                    continue;
+                }
+
+                // Target table MUST start with $this->prefix
+                if (strpos($target_table, $this->prefix) !== 0) {
+                    throw new Exception("Security Violation: Module '{$this->plugin_slug}' attempted unauthorized modification on table '{$target_table}'. Modules can only modify tables matching their own prefix '{$this->prefix}'.");
+                }
+            }
+        }
+    }
+
+    /**
      * Safely run a query on plugin-prefixed tables.
      * Enforces prefix rules on query keywords to prevent modification of core or sibling plugin tables.
      */
     public function query($sql, $params = [])
     {
-        // Enforce safety checks to ensure plugin only touches tables with its designated prefix, core settings, or audit logs
-        $normalized_sql = strtolower($sql);
-
-        // Block dangerous drops of core base tables
-        if (strpos($normalized_sql, 'drop table') !== false) {
-            $allowed = false;
-            if (strpos($normalized_sql, 'drop table if exists ' . $this->prefix) !== false ||
-                strpos($normalized_sql, 'drop table ' . $this->prefix) !== false) {
-                $allowed = true;
-            }
-            if (!$allowed) {
-                throw new Exception("Security Violation: Plugins can only drop tables matching their own prefix '{$this->prefix}'.");
-            }
-        }
+        // Enforce strict security mutation validation
+        $this->validateMutationAccess($sql);
 
         // Run prepared statements safely
         $stmt = $this->db->prepare($sql);
@@ -75,6 +103,10 @@ class PluginDatabase
     {
         $full_table = $this->getTableName($table_name);
         $sql = "DROP TABLE IF EXISTS {$full_table};";
+
+        // Enforce security check before dropping
+        $this->validateMutationAccess($sql);
+
         $this->db->exec($sql);
         return true;
     }

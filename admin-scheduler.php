@@ -53,20 +53,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Fetch states & logs
-$tasks = $scheduler->getTaskExecutionStates();
+// Fetch registered tasks from active modules and merge with DB states
+$registered_tasks = $scheduler->getRegisteredTasks();
+$db_states_raw = $scheduler->getTaskExecutionStates();
+$db_states = [];
+foreach ($db_states_raw as $s) {
+    $db_states[$s['task_key']] = $s;
+}
+
+// Merge registered active tasks with DB states
+$merged_tasks = [];
+foreach ($registered_tasks as $scoped_key => $task_info) {
+    $db_row = $db_states[$scoped_key] ?? [
+        'task_key' => $scoped_key,
+        'plugin_slug' => $task_info['plugin'],
+        'interval_seconds' => $task_info['interval'],
+        'is_enabled' => 1,
+        'custom_interval_seconds' => null,
+        'fixed_day_of_week' => null,
+        'fixed_time_of_day' => null,
+        'last_run' => null,
+        'next_run' => null,
+        'status' => 'idle',
+        'error_message' => null
+    ];
+    $merged_tasks[$scoped_key] = $db_row;
+}
+
 $logs = $scheduler->getRecentExecutionLogs(30);
 
 $days_map = [
     1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday',
     4 => 'Thursday', 5 => 'Friday', 6 => 'Saturday', 7 => 'Sunday'
 ];
+
+require_once __DIR__ . '/header.php';
 ?>
 
 <div class="row mb-4 text-start">
     <div class="col-md-8">
         <h1 class="h2"><i class="fa-solid fa-clock-rotate-left text-warning me-2"></i>Task Scheduler Overrides</h1>
-        <p class="text-muted">Directly manage and change background crons registered by active plugins. Toggle execution, define custom intervals, or set fixed weekly times.</p>
+        <p class="text-muted">Directly manage and change background crons registered by enabled modules. Toggle execution, define custom intervals, or set fixed weekly times.</p>
     </div>
     <div class="col-md-4 text-md-end align-self-center">
         <form method="POST" class="d-inline-block">
@@ -90,10 +117,12 @@ $days_map = [
     <!-- Tasks list -->
     <div class="col-lg-12">
         <div class="card shadow-sm mb-4">
-            <div class="card-header bg-dark text-white"><i class="fa-solid fa-clock me-1"></i>Registered Background Tasks</div>
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <span><i class="fa-solid fa-clock me-1"></i>Tasks from Enabled Modules (<?= count($merged_tasks) ?>)</span>
+            </div>
             <div class="card-body p-0">
-                <?php if (empty($tasks)): ?>
-                    <p class="text-muted p-4 mb-0">No background tasks found or registered. Make sure you activate at least one plugin.</p>
+                <?php if (empty($merged_tasks)): ?>
+                    <p class="text-muted p-4 mb-0">No background tasks registered by currently enabled modules. Make sure you activate at least one module with scheduled tasks.</p>
                 <?php else: ?>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
@@ -109,7 +138,7 @@ $days_map = [
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($tasks as $task): ?>
+                                <?php foreach ($merged_tasks as $task): ?>
                                     <tr>
                                         <td>
                                             <strong><code><?= htmlspecialchars($task['task_key']) ?></code></strong>
@@ -203,7 +232,7 @@ $days_map = [
                                                                 <input type="time" name="fixed_time_of_day" class="form-control form-control-sm" value="<?= htmlspecialchars($task['fixed_time_of_day'] ?? '') ?>">
                                                             </div>
                                                         </div>
-                                                        <div class="form-text mb-2">Define specific exact weekly day and time triggers for this background job. Ensure both Option A is blank if you configure Option B.</div>
+                                                        <div class="form-text mb-2">Define specific exact weekly day and time triggers for this background job. Ensure Option A is blank if you configure Option B.</div>
                                                     </div>
                                                     <div class="modal-footer">
                                                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
