@@ -59,38 +59,13 @@ $site_name = get_setting('site_name', 'Framework Portal');
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
+            <!-- Left Side Navbar Menu -->
             <ul class="navbar-nav me-auto">
                 <li class="nav-item">
                     <a class="nav-link <?= ($current_page === 'index.php' && !isset($_GET['route'])) ? 'active' : '' ?>" href="index.php">
                         <i class="fa-solid fa-house me-1"></i> Dashboard
                     </a>
                 </li>
-
-                <!-- Core Administration Links -->
-                <?php if (has_permission('manage_plugins')): ?>
-                    <li class="nav-item">
-                        <a class="nav-link <?= ($current_page === 'admin-plugins.php') ? 'active' : '' ?>" href="admin-plugins.php">
-                            <i class="fa-solid fa-puzzle-piece me-1"></i> Modules & Plugins
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link <?= ($current_page === 'admin-scheduler.php') ? 'active' : '' ?>" href="admin-scheduler.php">
-                            <i class="fa-solid fa-clock-rotate-left me-1 text-warning"></i> Task Scheduler
-                        </a>
-                    </li>
-                <?php endif; ?>
-                <?php if (has_permission('manage_settings')): ?>
-                    <li class="nav-item">
-                        <a class="nav-link <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
-                            <i class="fa-solid fa-users-gear me-1"></i> Users & RBAC
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link <?= ($current_page === 'admin-diagnostics.php') ? 'active' : '' ?>" href="admin-diagnostics.php">
-                            <i class="fa-solid fa-stethoscope me-1"></i> Diagnostics
-                        </a>
-                    </li>
-                <?php endif; ?>
 
                 <!-- Filter Hook for plugins to add navigation links dynamically (supporting nested sub-menus) -->
                 <?php
@@ -146,6 +121,44 @@ $site_name = get_setting('site_name', 'Framework Portal');
                 ?>
             </ul>
 
+            <!-- Right Side Navbar Menu (Consolidating Core Admin links to the right dropdown) -->
+            <ul class="navbar-nav ms-auto align-items-center me-3">
+                <?php if (has_permission('manage_plugins') || has_permission('manage_settings')): ?>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fa-solid fa-screwdriver-wrench me-1 text-warning"></i> Administration
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <?php if (has_permission('manage_plugins')): ?>
+                                <li>
+                                    <a class="dropdown-item <?= ($current_page === 'admin-plugins.php') ? 'active' : '' ?>" href="admin-plugins.php">
+                                        <i class="fa-solid fa-puzzle-piece me-2 text-primary"></i> Modules & Plugins
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item <?= ($current_page === 'admin-scheduler.php') ? 'active' : '' ?>" href="admin-scheduler.php">
+                                        <i class="fa-solid fa-clock-rotate-left me-2 text-warning"></i> Task Scheduler
+                                    </a>
+                                </li>
+                            <?php endif; ?>
+                            <?php if (has_permission('manage_settings')): ?>
+                                <li>
+                                    <a class="dropdown-item <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
+                                        <i class="fa-solid fa-users-gear me-2 text-success"></i> Users & RBAC
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item <?= ($current_page === 'admin-diagnostics.php') ? 'active' : '' ?>" href="admin-diagnostics.php">
+                                        <i class="fa-solid fa-stethoscope me-2 text-danger"></i> System Diagnostics
+                                    </a>
+                                </li>
+                            <?php endif; ?>
+                        </ul>
+                    </li>
+                <?php endif; ?>
+            </ul>
+
+            <!-- User Session profile & logout -->
             <?php if (isset($_SESSION['user_id'])): ?>
                 <div class="d-flex align-items-center text-white">
                     <div class="me-3 text-end">
