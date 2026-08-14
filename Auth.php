@@ -151,7 +151,7 @@ class Auth
     /* =========================================================
      * ROLES FROM AZURE + DB OVERRIDES
      * ========================================================= */
-    public function getRoles(int $userId, array $groups): array
+    public function getRoles(int $userId, array $groups = []): array
     {
         $roles = [];
 
@@ -189,11 +189,21 @@ class Auth
     }
 
     /* =========================================================
-     * FULL PERMISSION ENGINE (ROLE + USER + DENY)
+     * FULL PERMISSION ENGINE (ROLE + USER + DENY + ADMIN SUPERUSER)
      * ========================================================= */
-    public function getPermissions(int $userId, array $groups): array
+    public function getPermissions(int $userId, array $groups = []): array
     {
         $permissions = [];
+        $roles = $this->getRoles($userId, $groups);
+
+        // SUPERUSER BYPASS: Admin role automatically possesses all registered permissions in system
+        if (isset($roles['admin'])) {
+            $all_perms = $this->db->query("SELECT permission_name FROM permissions")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($all_perms as $p_name) {
+                $permissions[$p_name] = true;
+            }
+            return $permissions;
+        }
 
         /* 1. ROLE-BASED PERMISSIONS */
         $sql = "

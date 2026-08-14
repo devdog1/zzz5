@@ -63,7 +63,7 @@ function oncall_get_all_departments() {
 
     // Safely left join to core framework users table (which is outside the plug namespace)
     $sql = "
-        SELECT d.*, u.username AS manager_username, u.display_name AS manager_name
+        SELECT d.*, u.username AS manager_username, COALESCE(NULLIF(u.display_name, ''), u.username) AS manager_name
         FROM {$tb_depts} d
         LEFT JOIN users u ON d.manager_user_id = u.id
         ORDER BY d.name ASC
@@ -111,11 +111,11 @@ function oncall_get_department_users($department_id) {
     $pdb = oncall_get_pdb();
     $tb_du = $pdb->getTableName('department_users');
     $sql = "
-        SELECT u.*
+        SELECT u.id, u.username, u.email, COALESCE(NULLIF(u.display_name, ''), u.username) AS display_name
         FROM users u
         JOIN {$tb_du} du ON u.id = du.user_id
         WHERE du.department_id = ?
-        ORDER BY u.display_name ASC
+        ORDER BY display_name ASC
     ";
     return $pdb->query($sql, [$department_id])->fetchAll();
 }
@@ -267,7 +267,7 @@ function oncall_get_overrides($department_id = null) {
     $tb_depts = $pdb->getTableName('departments');
 
     $sql = "
-        SELECT o.*, d.name AS department_name, u.display_name, u.username
+        SELECT o.*, d.name AS department_name, COALESCE(NULLIF(u.display_name, ''), u.username) AS display_name, u.username
         FROM {$tb_ovs} o
         JOIN {$tb_depts} d ON o.department_id = d.id
         JOIN users u ON o.user_id = u.id
@@ -316,7 +316,7 @@ function oncall_calculate_final_schedule($base_slots, $overrides) {
             'end' => strtotime($slot['end_time']),
             'user_id' => $slot['user_id'],
             'username' => $slot['username'],
-            'display_name' => $slot['display_name'] ?? $slot['username'],
+            'display_name' => !empty($slot['display_name']) ? $slot['display_name'] : $slot['username'],
             'is_override' => false,
             'description' => 'Base Rotation'
         ];
@@ -357,7 +357,7 @@ function oncall_calculate_final_schedule($base_slots, $overrides) {
             'end' => $o_end,
             'user_id' => $override['user_id'],
             'username' => $override['username'],
-            'display_name' => $override['display_name'] ?? $override['username'],
+            'display_name' => !empty($override['display_name']) ? $override['display_name'] : $override['username'],
             'is_override' => true,
             'description' => $override['description'] ?: 'Manual Override'
         ];
@@ -483,7 +483,7 @@ function oncall_get_final_schedule_for_department($department_id, $start_time_st
     $tb_ovs = $pdb->getTableName('overrides');
 
     $sql_slots = "
-        SELECT s.*, u.username, u.display_name
+        SELECT s.*, u.username, COALESCE(NULLIF(u.display_name, ''), u.username) AS display_name
         FROM {$tb_slots} s
         JOIN users u ON s.user_id = u.id
         WHERE s.department_id = ?
@@ -494,7 +494,7 @@ function oncall_get_final_schedule_for_department($department_id, $start_time_st
     $base_slots = $pdb->query($sql_slots, [$department_id, $end_time_str, $start_time_str])->fetchAll();
 
     $sql_ovs = "
-        SELECT o.*, u.username, u.display_name
+        SELECT o.*, u.username, COALESCE(NULLIF(u.display_name, ''), u.username) AS display_name
         FROM {$tb_ovs} o
         JOIN users u ON o.user_id = u.id
         WHERE o.department_id = ?
@@ -550,8 +550,8 @@ function oncall_get_trade_requests_by_department($department_id = null) {
 
     $sql = "
         SELECT tr.*,
-               p.display_name AS proposer_name, p.username AS proposer_username,
-               a.display_name AS accepter_name, a.username AS accepter_username,
+               COALESCE(NULLIF(p.display_name, ''), p.username) AS proposer_name, p.username AS proposer_username,
+               COALESCE(NULLIF(a.display_name, ''), a.username) AS accepter_name, a.username AS accepter_username,
                d.name AS department_name,
                s_offered.start_time AS offered_start, s_offered.end_time AS offered_end,
                s_counter.start_time AS counter_start, s_counter.end_time AS counter_end
@@ -580,8 +580,8 @@ function oncall_get_trade_request_by_id($trade_id) {
 
     $sql = "
         SELECT tr.*,
-               p.display_name AS proposer_name, p.username AS proposer_username,
-               a.display_name AS accepter_name, a.username AS accepter_username,
+               COALESCE(NULLIF(p.display_name, ''), p.username) AS proposer_name, p.username AS proposer_username,
+               COALESCE(NULLIF(a.display_name, ''), a.username) AS accepter_name, a.username AS accepter_username,
                d.name AS department_name,
                s_offered.start_time AS offered_start, s_offered.end_time AS offered_end,
                s_counter.start_time AS counter_start, s_counter.end_time AS counter_end
