@@ -1,6 +1,10 @@
 <?php
 // config.php - Configuration for Azure SSO and Database
 
+if (!defined('APP_ROOT')) {
+    define('APP_ROOT', __DIR__);
+}
+
 return [
     'azure' => [
         'clientId'     => 'mock_client_id',

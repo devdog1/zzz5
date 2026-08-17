@@ -40,6 +40,31 @@ function require_login() {
 }
 
 /* =========================================================
+ * PLUGIN & HOOK HELPER WRAPPERS
+ * ========================================================= */
+
+function add_action($hook, $callback, $priority = 10) {
+    PluginManager::getInstance()->addAction($hook, $callback, $priority);
+}
+
+function add_filter($hook, $callback, $priority = 10) {
+    PluginManager::getInstance()->addFilter($hook, $callback, $priority);
+}
+
+function register_route($route_name, $callback) {
+    PluginManager::getInstance()->registerRoute($route_name, $callback);
+}
+
+function url_for($route_name) {
+    return 'index.php?route=' . urlencode($route_name);
+}
+
+function redirect($url) {
+    header("Location: " . $url);
+    exit;
+}
+
+/* =========================================================
  * SECURITY: CSRF (Anti-Forgery Tokens)
  * ========================================================= */
 
@@ -76,6 +101,10 @@ function validate_csrf() {
             die("<h1>403 Forbidden: Security CSRF Verification Failed.</h1><p>Please reload the page and try again.</p>");
         }
     }
+}
+
+function csrf_verify() {
+    validate_csrf();
 }
 
 /* =========================================================

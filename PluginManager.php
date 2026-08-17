@@ -370,7 +370,7 @@ class PluginManager
             }
 
             // Trigger activation action hook safely
-            $this->doAction("activate_plugin_{$slug}");
+            $this->doAction("plugin_activate_{$slug}");
             return true;
         } catch (Exception $e) {
             $db->rollBack();
@@ -448,7 +448,7 @@ class PluginManager
             }
 
             // Trigger deactivation action hook safely
-            $this->doAction("deactivate_plugin_{$slug}");
+            $this->doAction("plugin_deactivate_{$slug}");
 
             if (($key = array_search($slug, $this->activePlugins)) !== false) {
                 unset($this->activePlugins[$key]);
@@ -475,6 +475,12 @@ class PluginManager
                     error_log("Error booting plugin [{$slug}]: " . $t->getMessage());
                 }
             }
+        }
+
+        // Trigger lifecycle hooks after loading plugin files
+        $this->doAction('register_routes');
+        if (class_exists('Scheduler')) {
+            $this->doAction('init_scheduler', Scheduler::getInstance());
         }
     }
 }

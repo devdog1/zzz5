@@ -1,6 +1,6 @@
 <?php
 // oncall-models.php - Adapting core zzz4 business logic rules to the prefixed PluginDatabase API
-require_once __DIR__ . '/../../PluginDatabase.php';
+require_once __DIR__ . '/../../../PluginDatabase.php';
 
 function oncall_get_pdb() {
     return new PluginDatabase('oncall-manager');
@@ -23,7 +23,7 @@ function oncall_can_manage_department($department_id) {
 }
 
 /* =========================================================
- * PLUGIN SPECIFIC SETTINGS API (Isolating settings inside plugin DB table)
+ * PLUGIN SPECIFIC SETTINGS API
  * ========================================================= */
 
 function oncall_get_setting($key, $default = null) {
@@ -61,7 +61,6 @@ function oncall_get_all_departments() {
     $pdb = oncall_get_pdb();
     $tb_depts = $pdb->getTableName('departments');
 
-    // Safely left join to core framework users table (which is outside the plug namespace)
     $sql = "
         SELECT d.*, u.username AS manager_username, COALESCE(NULLIF(u.display_name, ''), u.username) AS manager_name
         FROM {$tb_depts} d
@@ -526,7 +525,6 @@ function oncall_get_upcoming_user_shifts($user_id, $limit = 5) {
     $tb_slots = $pdb->getTableName('schedule_slots');
     $tb_depts = $pdb->getTableName('departments');
 
-    // Fetch upcoming on-call shifts starting from now
     $sql = "
         SELECT s.*, d.name AS department_name
         FROM {$tb_slots} s
@@ -601,7 +599,6 @@ function oncall_get_user_schedule_slots($user_id, $department_id) {
     $tb_slots = $pdb->getTableName('schedule_slots');
     $tb_depts = $pdb->getTableName('departments');
 
-    // Retrieve active and upcoming slots where end_time is in the future
     $sql = "
         SELECT s.*, d.name AS department_name
         FROM {$tb_slots} s
@@ -616,7 +613,6 @@ function oncall_propose_trade($department_id, $offered_slot_id, $proposing_user_
     $pdb = oncall_get_pdb();
     $tb_tr = $pdb->getTableName('trade_requests');
 
-    // Prevent duplicate trades on same slot
     $check = $pdb->query("SELECT id FROM {$tb_tr} WHERE offered_slot_id = ? AND status IN ('open', 'offered', 'agreed')", [$offered_slot_id])->fetch();
     if ($check) {
         throw new Exception("This slot is already up for trade.");
@@ -685,7 +681,6 @@ function oncall_manager_approve_trade($trade_id) {
         throw new Exception("Trade request is not agreed upon yet.");
     }
 
-    // Swap rosters inside schedule_slots table safely
     if ($trade['counter_slot_id']) {
         $pdb->query("UPDATE {$tb_slots} SET user_id = ? WHERE id = ?", [$trade['accepting_user_id'], $trade['offered_slot_id']]);
         $pdb->query("UPDATE {$tb_slots} SET user_id = ? WHERE id = ?", [$trade['proposing_user_id'], $trade['counter_slot_id']]);
@@ -710,12 +705,9 @@ function oncall_manager_reject_trade($trade_id) {
 }
 
 /* =========================================================
- * BACKGROUND RECURRING SYNC ENGINE CODES (ZABBIX API)
+ * BACKGROUND RECURRING SYNC ENGINE CODES
  * ========================================================= */
 
-/**
- * Sync telephone forwarding states to Metaswitch CommPortal accounts.
- */
 function oncall_sync_commportal_background() {
     $pdb = oncall_get_pdb();
     $tb_accounts = $pdb->getTableName('commportal_accounts');
@@ -728,11 +720,6 @@ function oncall_sync_commportal_background() {
     log_action('ONCALL_TELEPHONIC_CRON_SYNC_SUCCESS', ['monitored_lines' => count($accounts)]);
 }
 
-/**
- * Complete Zabbix API JSON-RPC synchronization client.
- * Requests active roster users and their media mappings, registers/provisions them
- * inside the core user directory, and creates secure references inside plug_oncall_manager_zabbix_user_map.
- */
 function oncall_sync_zabbix_via_api() {
     $pdb = oncall_get_pdb();
     $tb_map = $pdb->getTableName('zabbix_user_map');
@@ -741,12 +728,10 @@ function oncall_sync_zabbix_via_api() {
     $api_url = oncall_get_setting('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php');
     $api_token = oncall_get_setting('zabbix_api_token', '');
 
-    // In local dev/fallback, if URL is default/mock, we simulate the API JSON response
     $is_mock = (strpos($api_url, '127.0.0.1') !== false || empty($api_token));
     $zabbix_users = [];
 
     if ($is_mock) {
-        // Mock Zabbix user responses
         $zabbix_users = [
             [
                 'userid' => '101',
@@ -777,7 +762,6 @@ function oncall_sync_zabbix_via_api() {
             ]
         ];
     } else {
-        // Query the live JSON-RPC Zabbix Endpoint securely
         $payload = [
             'jsonrpc' => '2.0',
             'method' => 'user.get',
@@ -818,7 +802,6 @@ function oncall_sync_zabbix_via_api() {
         $email = $username . '@example.com';
         $display_name = $zu['name'] . ' ' . $zu['surname'];
 
-        // Extract phone number from SMS Media type 4
         $phone = '';
         if (!empty($zu['medias']) && is_array($zu['medias'])) {
             foreach ($zu['medias'] as $m) {
@@ -829,24 +812,20 @@ function oncall_sync_zabbix_via_api() {
             }
         }
 
-        // 1. Resolve or Insert into the core users registry table
         $stmt = $db->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
         $stmt->execute([$username, $email]);
         $local = $stmt->fetch();
 
         if ($local) {
             $local_user_id = $local['id'];
-            // Update phone and display name
             $stmt_u = $db->prepare("UPDATE users SET display_name = ?, phone = ? WHERE id = ?");
             $stmt_u->execute([$display_name, $phone, $local_user_id]);
         } else {
-            // Provision user
             $stmt_i = $db->prepare("INSERT INTO users (username, email, display_name, phone, auto_provisioned) VALUES (?, ?, ?, ?, 1)");
             $stmt_i->execute([$username, $email, $display_name, $phone]);
             $local_user_id = $db->lastInsertId();
         }
 
-        // 2. Insert or Update inside the dynamic mapping table
         $pdb->query("
             INSERT INTO {$tb_map} (zabbix_userid, local_user_id)
             VALUES (?, ?)
@@ -860,9 +839,6 @@ function oncall_sync_zabbix_via_api() {
     return $synced_count;
 }
 
-/**
- * Safe Zabbix API User Group assignment update trigger.
- */
 function oncall_trigger_zabbix_user_group_update($usrgrp_id, $zabbix_userid) {
     $api_url = oncall_get_setting('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php');
     $api_token = oncall_get_setting('zabbix_api_token', '');
@@ -903,17 +879,12 @@ function oncall_trigger_zabbix_user_group_update($usrgrp_id, $zabbix_userid) {
     return $result !== false;
 }
 
-/**
- * Scans all departments to locate the currently active on-call user.
- * Looks up their mapped Zabbix User ID and automatically triggers the Zabbix API user group auto-assignment updates.
- */
 function oncall_sync_all_departments_zabbix_groups() {
     $pdb = oncall_get_pdb();
     $tb_zg = $pdb->getTableName('department_zabbix_groups');
     $tb_map = $pdb->getTableName('zabbix_user_map');
     $now = time();
 
-    // Fetch all department-group associations
     $groups = $pdb->query("SELECT * FROM {$tb_zg}")->fetchAll();
     if (empty($groups)) {
         return;
@@ -924,7 +895,6 @@ function oncall_sync_all_departments_zabbix_groups() {
         $grp_id = $g['zabbix_usrgrp_id'];
         $last_user = $g['last_oncall_userid'];
 
-        // Determine current active on-call person
         $current = oncall_get_current_on_call($dept_id, $now);
         if (!$current) {
             continue;
@@ -932,21 +902,16 @@ function oncall_sync_all_departments_zabbix_groups() {
 
         $local_user_id = $current['user_id'];
 
-        // Retrieve mapped Zabbix User ID
         $map = $pdb->query("SELECT zabbix_userid FROM {$tb_map} WHERE local_user_id = ?", [$local_user_id])->fetch();
         if (!$map) {
-            // User does not have a mapped Zabbix ID, skip
             continue;
         }
 
         $zabbix_userid = $map['zabbix_userid'];
 
-        // Check if the on-call person has changed for this group
         if ($zabbix_userid != $last_user) {
-            // Trigger the API auto-assignment
             $success = oncall_trigger_zabbix_user_group_update($grp_id, $zabbix_userid);
             if ($success) {
-                // Update tracking status
                 $pdb->query("
                     UPDATE {$tb_zg}
                     SET last_oncall_userid = ?

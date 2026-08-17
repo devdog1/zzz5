@@ -16,6 +16,14 @@ class PluginDatabase
     }
 
     /**
+     * Get prefix for the plugin namespace
+     */
+    public function getPrefix()
+    {
+        return $this->prefix;
+    }
+
+    /**
      * Helper to get full table name with plugin specific safety prefix.
      */
     public function getTableName($table_name)

@@ -1,296 +1,459 @@
 <?php
-/*
-Plugin Name: On-Call Schedule Manager
-Description: Complete dynamic rotation calendars, rotation generators, manual overrides, shift trades center, and metaswitch call forwarding.
-Version: 1.1.0
-Author: On-Call Developers
-Permissions: view_schedules, manage_schedules, manage_telephony
-Roles: manager:view_schedules,manage_schedules; agent:view_schedules
-*/
+/**
+ * Plugin Name: On-Call Schedule Manager
+ * Description: Enterprise On-Call Rotation, Shift Trade Center, Manual Overrides, Metaswitch CommPortal & Zabbix Integration.
+ * Version: 2.1
+ * Author: DevDog
+ * Roles: Manager, Operator, Viewer
+ * Role_Permissions_Manager: manage_schedule, manage_trades, manage_departments, manage_settings, manage_telephony, view_schedule
+ * Role_Permissions_Operator: manage_trades, view_schedule
+ * Role_Permissions_Viewer: view_schedule
+ */
 
-// Prevent direct access
-if (!class_exists('PluginManager')) {
-    exit;
+if (!defined('APP_ROOT')) {
+    die('Direct access not permitted.');
 }
 
-// Load underlying models / operations
-require_once __DIR__ . '/oncall-models.php';
+// Load Plugin Models
+require_once __DIR__ . '/models/oncall-models.php';
 
-// 1. Register nested menu navigation bar dropdown dynamically
-PluginManager::getInstance()->addFilter('theme_nav_links', function ($links) {
-    $links[] = [
-        'label' => 'On-Call Manager',
-        'icon'  => 'fa-solid fa-business-time text-info',
-        'permission' => 'oncall_manager_view_schedules',
+// Load Plugin Views
+require_once __DIR__ . '/views/calendar-view.php';
+require_once __DIR__ . '/views/trades-view.php';
+require_once __DIR__ . '/views/overrides-view.php';
+require_once __DIR__ . '/views/departments-view.php';
+require_once __DIR__ . '/views/telephony-view.php';
+require_once __DIR__ . '/views/generate-view.php';
+require_once __DIR__ . '/views/settings-view.php';
+
+// Load Background Tasks
+require_once __DIR__ . '/tasks/commportal-sync-task.php';
+require_once __DIR__ . '/tasks/zabbix-sync-task.php';
+require_once __DIR__ . '/tasks/zabbix-group-assign-task.php';
+
+/* =========================================================
+ * ACTIVATION & DEACTIVATION HOOKS
+ * ========================================================= */
+
+add_action('plugin_activate_oncall-manager', 'oncall_plugin_install_tables');
+function oncall_plugin_install_tables() {
+    $install_sql_file = __DIR__ . '/sql/install.sql';
+    if (file_exists($install_sql_file)) {
+        $pdb = oncall_get_pdb();
+        $db = get_db_connection();
+        $sql = file_get_contents($install_sql_file);
+
+        // Substitute {prefix} with real plugin table prefix (plug_oncall_manager_)
+        $sql = str_replace('{prefix}', $pdb->getPrefix(), $sql);
+        $db->exec($sql);
+    }
+}
+
+add_action('plugin_deactivate_oncall-manager', 'oncall_plugin_uninstall_tables');
+function oncall_plugin_uninstall_tables() {
+    $uninstall_sql_file = __DIR__ . '/sql/uninstall.sql';
+    if (file_exists($uninstall_sql_file)) {
+        $pdb = oncall_get_pdb();
+        $db = get_db_connection();
+        $sql = file_get_contents($uninstall_sql_file);
+
+        $sql = str_replace('{prefix}', $pdb->getPrefix(), $sql);
+        $db->exec($sql);
+    }
+}
+
+/* =========================================================
+ * NAVIGATION MENU LINKS
+ * ========================================================= */
+
+add_filter('theme_nav_links', function($nav) {
+    if (!has_permission('view_schedule')) {
+        return $nav;
+    }
+
+    $oncall_menu = [
+        'title' => '<i class="bi bi-telephone-inbound me-1"></i> On-Call Schedule',
+        'url' => url_for('oncall_calendar'),
         'children' => [
-            [
-                'route' => 'oncall_calendar',
-                'label' => 'Interactive Calendar',
-                'icon'  => 'fa-solid fa-calendar-days',
-                'permission' => 'oncall_manager_view_schedules'
-            ],
-            [
-                'route' => 'oncall_trades',
-                'label' => 'Shift Trades Center',
-                'icon'  => 'fa-solid fa-right-left',
-                'permission' => 'oncall_manager_view_schedules'
-            ],
-            [
-                'route' => 'oncall_overrides',
-                'label' => 'Manual Overrides',
-                'icon'  => 'fa-solid fa-clock-rotate-left',
-                'permission' => 'oncall_manager_view_schedules'
-            ],
-            [
-                'route' => 'oncall_generate',
-                'label' => 'Generate Rotation',
-                'icon'  => 'fa-solid fa-arrows-spin',
-                'permission' => 'oncall_manager_manage_schedules'
-            ],
-            [
-                'route' => 'oncall_settings',
-                'label' => 'NOC Shift & Settings',
-                'icon'  => 'fa-solid fa-gears',
-                'permission' => 'oncall_manager_view_schedules'
-            ],
-            [
-                'route' => 'oncall_departments',
-                'label' => 'Manage Departments',
-                'icon'  => 'fa-solid fa-sitemap',
-                'permission' => 'oncall_manager_manage_schedules'
-            ],
-            [
-                'route' => 'oncall_telephony',
-                'label' => 'Telephony Sync',
-                'icon'  => 'fa-solid fa-phone-volume',
-                'permission' => 'oncall_manager_manage_telephony'
-            ]
+            ['title' => 'Rotation Calendar', 'url' => url_for('oncall_calendar')],
+            ['title' => 'Shift Trade Center', 'url' => url_for('oncall_trades')]
         ]
     ];
-    return $links;
-});
 
-// 2. Register home screen active coverage and upcoming shifts widgets
-PluginManager::getInstance()->addAction('index_dashboard_widgets', function ($userContext) {
-    $now = time();
-    $departments = oncall_get_all_departments();
-
-    // RENDER SECTION 1: Active Coverage status widgets inside its own identified space on the dashboard
-    if (!empty($departments)) {
-        echo '<div class="col-12 text-start mb-2 mt-2"><h5 class="fw-bold text-dark border-bottom pb-2"><i class="fa-solid fa-shield-halved text-success me-2"></i>Active Department On-Call Coverage</h5></div>';
-        foreach ($departments as $dept) {
-            $current = oncall_get_current_on_call($dept['id'], $now);
-            $is_override = $current && $current['is_override'];
-            $border_class = $current ? ($is_override ? 'border-warning' : 'border-success') : 'border-danger';
-            ?>
-            <div class="col-md-6 col-lg-4 mb-3">
-                <div class="card shadow-sm border-start border-5 <?= $border_class ?> text-start">
-                    <div class="card-body">
-                        <div class="d-flex w-100 justify-content-between align-items-center mb-2">
-                            <h6 class="fw-bold mb-0 text-primary"><?= htmlspecialchars($dept['name']) ?></h6>
-                            <?php if ($current): ?>
-                                <?php if ($is_override): ?>
-                                    <span class="badge bg-warning text-dark small">Override Active</span>
-                                <?php else: ?>
-                                    <span class="badge bg-success small">Active</span>
-                                <?php endif; ?>
-                            <?php else: ?>
-                                <span class="badge bg-danger small">No Coverage</span>
-                            <?php endif; ?>
-                        </div>
-                        <?php if ($current): ?>
-                            <p class="small mb-1"><strong>On-Call:</strong> <?= htmlspecialchars($current['display_name'] ?? $current['username']) ?></p>
-                            <p class="text-muted small fs-7 mb-0"><i class="fa-solid fa-clock me-1"></i> Ends: <?= date('M d, H:i', $current['end']) ?></p>
-                        <?php else: ?>
-                            <p class="small text-danger mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i> No active rotations found.</p>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-            <?php
-        }
+    if (has_permission('manage_schedule')) {
+        $oncall_menu['children'][] = ['title' => 'Manual Overrides', 'url' => url_for('oncall_overrides')];
+        $oncall_menu['children'][] = ['title' => '365-Day Shift Generator', 'url' => url_for('oncall_generate')];
     }
 
-    // RENDER SECTION 2: Current user's upcoming shifts widget inside its own identified space on the dashboard
-    $userId = $userContext['id'];
-    if ($userId) {
-        $upcoming = oncall_get_upcoming_user_shifts($userId, 3);
-        if (!empty($upcoming)) {
-            echo '<div class="col-12 text-start mb-2 mt-3"><h5 class="fw-bold text-dark border-bottom pb-2"><i class="fa-solid fa-calendar-check text-info me-2"></i>Your Upcoming On-Call Shifts</h5></div>';
-            foreach ($upcoming as $sh) {
-                ?>
-                <div class="col-md-6 col-lg-4 mb-3">
-                    <div class="card shadow-sm border-start border-5 border-info text-start">
-                        <div class="card-body">
-                            <h6 class="fw-bold mb-1 text-info"><?= htmlspecialchars($sh['department_name']) ?></h6>
-                            <p class="small mb-1 text-muted">You are scheduled on-call for this department:</p>
-                            <p class="small mb-0 font-monospace text-dark"><strong>Start:</strong> <?= date('M d, H:i', strtotime($sh['start_time'])) ?></p>
-                            <p class="small mb-0 font-monospace text-dark"><strong>End:</strong> <?= date('M d, H:i', strtotime($sh['end_time'])) ?></p>
-                        </div>
-                    </div>
-                </div>
-                <?php
+    if (has_permission('manage_departments')) {
+        $oncall_menu['children'][] = ['title' => 'Department Management', 'url' => url_for('oncall_departments')];
+    }
+
+    if (has_permission('manage_telephony')) {
+        $oncall_menu['children'][] = ['title' => 'CommPortal Telephony', 'url' => url_for('oncall_telephony')];
+    }
+
+    if (has_permission('manage_settings')) {
+        $oncall_menu['children'][] = ['title' => 'Plugin Settings', 'url' => url_for('oncall_settings')];
+    }
+
+    $nav[] = $oncall_menu;
+    return $nav;
+});
+
+/* =========================================================
+ * SCHEDULED TASKS REGISTRATION
+ * ========================================================= */
+
+add_action('init_scheduler', function($scheduler) {
+    $scheduler->registerTask(
+        'oncall_commportal_sync',
+        'CommPortal Telephony Sync',
+        '* * * * *',
+        'oncall_task_commportal_sync'
+    );
+
+    $scheduler->registerTask(
+        'oncall_zabbix_sync',
+        'Zabbix API Users Sync',
+        '0 * * * *',
+        'oncall_task_zabbix_sync'
+    );
+
+    $scheduler->registerTask(
+        'oncall_zabbix_group_assign',
+        'Zabbix On-Call Group Auto-Assignment',
+        '* * * * *',
+        'oncall_task_zabbix_group_assign'
+    );
+});
+
+/* =========================================================
+ * ROUTE HANDLERS
+ * ========================================================= */
+
+add_action('register_routes', function() {
+    register_route('oncall_calendar', function() {
+        if (!has_permission('view_schedule')) die('Access Denied');
+        oncall_render_calendar_page();
+    });
+
+    register_route('oncall_trades', function() {
+        if (!has_permission('manage_trades')) die('Access Denied');
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            csrf_verify();
+            $action = $_POST['action'] ?? '';
+            $dept_id = (int)($_POST['department_id'] ?? 0);
+            $current_user_id = $_SESSION['user_id'] ?? null;
+
+            try {
+                if ($action === 'propose_trade') {
+                    $slot_id = (int)$_POST['offered_slot_id'];
+                    oncall_propose_trade($dept_id, $slot_id, $current_user_id);
+                    redirect(url_for('oncall_trades') . "&department_id={$dept_id}&msg=" . urlencode('Trade proposal created successfully.'));
+                } elseif ($action === 'accept_take') {
+                    $trade_id = (int)$_POST['trade_id'];
+                    oncall_accept_trade_take($trade_id, $current_user_id);
+                    redirect(url_for('oncall_trades') . "&department_id={$dept_id}&msg=" . urlencode('Accepted shift take request. Pending manager approval.'));
+                } elseif ($action === 'proposer_agree') {
+                    $trade_id = (int)$_POST['trade_id'];
+                    oncall_proposer_agree_swap($trade_id);
+                    redirect(url_for('oncall_trades') . "&department_id={$dept_id}&msg=" . urlencode('Agreed to swap. Pending manager approval.'));
+                } elseif ($action === 'cancel_trade') {
+                    $trade_id = (int)$_POST['trade_id'];
+                    oncall_cancel_trade_request($trade_id);
+                    redirect(url_for('oncall_trades') . "&department_id={$dept_id}&msg=" . urlencode('Trade request canceled.'));
+                } elseif ($action === 'approve_trade' && oncall_can_manage_department($dept_id)) {
+                    $trade_id = (int)$_POST['trade_id'];
+                    oncall_manager_approve_trade($trade_id);
+                    redirect(url_for('oncall_trades') . "&department_id={$dept_id}&msg=" . urlencode('Trade request approved and schedule updated.'));
+                } elseif ($action === 'reject_trade' && oncall_can_manage_department($dept_id)) {
+                    $trade_id = (int)$_POST['trade_id'];
+                    oncall_manager_reject_trade($trade_id);
+                    redirect(url_for('oncall_trades') . "&department_id={$dept_id}&msg=" . urlencode('Trade request rejected.'));
+                }
+            } catch (Exception $e) {
+                redirect(url_for('oncall_trades') . "&department_id={$dept_id}&err=" . urlencode($e->getMessage()));
             }
         }
+
+        oncall_render_trades_page();
+    });
+
+    register_route('oncall_overrides', function() {
+        if (!has_permission('manage_schedule')) die('Access Denied');
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            csrf_verify();
+            $action = $_POST['action'] ?? '';
+
+            if ($action === 'create_override') {
+                $dept_id = (int)$_POST['department_id'];
+                $user_id = (int)$_POST['user_id'];
+                $start = $_POST['start_time'];
+                $end = $_POST['end_time'];
+                $desc = $_POST['description'];
+
+                oncall_create_override($dept_id, $user_id, $start, $end, $desc);
+                redirect(url_for('oncall_overrides') . '&msg=' . urlencode('Schedule override created successfully.'));
+            } elseif ($action === 'delete_override') {
+                $id = (int)$_POST['id'];
+                oncall_delete_override($id);
+                redirect(url_for('oncall_overrides') . '&msg=' . urlencode('Schedule override removed successfully.'));
+            }
+        }
+
+        oncall_render_overrides_page();
+    });
+
+    register_route('oncall_departments', function() {
+        if (!has_permission('manage_departments')) die('Access Denied');
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            csrf_verify();
+            $action = $_POST['action'] ?? '';
+
+            if ($action === 'create_department') {
+                $name = $_POST['name'] ?? '';
+                $mgr = !empty($_POST['manager_user_id']) ? (int)$_POST['manager_user_id'] : null;
+                oncall_create_department($name, $mgr);
+                redirect(url_for('oncall_departments') . '&msg=' . urlencode('Department created successfully.'));
+            } elseif ($action === 'update_department') {
+                $id = (int)$_POST['id'];
+                $name = $_POST['name'] ?? '';
+                $mgr = !empty($_POST['manager_user_id']) ? (int)$_POST['manager_user_id'] : null;
+                $noc = !empty($_POST['noc_mode']) ? 1 : 0;
+                oncall_update_department($id, $name, $mgr, $noc);
+
+                $z_groups = [];
+                if (!empty($_POST['zabbix_usrgrp_ids'])) {
+                    $raw = explode(',', $_POST['zabbix_usrgrp_ids']);
+                    foreach ($raw as $r) {
+                        $trimmed = trim($r);
+                        if (is_numeric($trimmed)) {
+                            $z_groups[] = (int)$trimmed;
+                        }
+                    }
+                }
+                oncall_save_department_zabbix_groups($id, $z_groups);
+
+                redirect(url_for('oncall_departments') . "&id={$id}&msg=" . urlencode('Department settings updated.'));
+            } elseif ($action === 'delete_department') {
+                $id = (int)$_POST['id'];
+                oncall_delete_department($id);
+                redirect(url_for('oncall_departments') . '&msg=' . urlencode('Department deleted.'));
+            } elseif ($action === 'update_members') {
+                $dept_id = (int)$_POST['department_id'];
+                $u_ids = $_POST['user_ids'] ?? [];
+                oncall_save_department_users($dept_id, $u_ids);
+                redirect(url_for('oncall_departments') . "&id={$dept_id}&msg=" . urlencode('Department roster updated.'));
+            }
+        }
+
+        oncall_render_departments_page();
+    });
+
+    register_route('oncall_telephony', function() {
+        if (!has_permission('manage_telephony')) die('Access Denied');
+
+        $pdb = oncall_get_pdb();
+        $tb_accounts = $pdb->getTableName('commportal_accounts');
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            csrf_verify();
+            $action = $_POST['action'] ?? '';
+
+            if ($action === 'save_account') {
+                $num = $_POST['account_number'] ?? '';
+                $pass = $_POST['commportal_pass'] ?? '';
+                $fwd = $_POST['forwarding_number'] ?? '';
+
+                $pdb->query("
+                    INSERT INTO {$tb_accounts} (account_number, commportal_pass, forwarding_number)
+                    VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE commportal_pass = ?, forwarding_number = ?
+                ", [$num, $pass, $fwd, $pass, $fwd]);
+
+                redirect(url_for('oncall_telephony') . '&msg=' . urlencode('Telephony account saved.'));
+            } elseif ($action === 'delete_account') {
+                $id = (int)$_POST['id'];
+                $pdb->query("DELETE FROM {$tb_accounts} WHERE id = ?", [$id]);
+                redirect(url_for('oncall_telephony') . '&msg=' . urlencode('Telephony account removed.'));
+            }
+        }
+
+        oncall_render_telephony_page();
+    });
+
+    register_route('oncall_generate', function() {
+        if (!has_permission('manage_schedule')) die('Access Denied');
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            csrf_verify();
+            $action = $_POST['action'] ?? '';
+
+            if ($action === 'generate_schedule') {
+                $dept_id = (int)$_POST['department_id'];
+                $start_date = $_POST['start_date'];
+                $user_ids = $_POST['user_ids'] ?? [];
+
+                try {
+                    oncall_generate_365_day_schedule($dept_id, $user_ids, $start_date);
+                    redirect(url_for('oncall_calendar') . "&department_id={$dept_id}&msg=" . urlencode('365-day rotation schedule successfully generated.'));
+                } catch (Exception $e) {
+                    redirect(url_for('oncall_generate') . "&department_id={$dept_id}&err=" . urlencode($e->getMessage()));
+                }
+            }
+        }
+
+        oncall_render_generate_page();
+    });
+
+    register_route('oncall_settings', function() {
+        if (!has_permission('manage_settings')) die('Access Denied');
+
+        $pdb = oncall_get_pdb();
+        $tb_noc = $pdb->getTableName('noc_business_hours');
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            csrf_verify();
+            $action = $_POST['action'] ?? '';
+
+            if ($action === 'save_zabbix_settings') {
+                $url = $_POST['zabbix_api_url'] ?? '';
+                $token = $_POST['zabbix_api_token'] ?? '';
+
+                oncall_set_setting('zabbix_api_url', $url);
+                oncall_set_setting('zabbix_api_token', $token);
+
+                redirect(url_for('oncall_settings') . '&msg=' . urlencode('Zabbix API integration settings saved.'));
+            } elseif ($action === 'save_noc_hours') {
+                $hours_input = $_POST['noc_hours'] ?? [];
+                foreach ($hours_input as $dow => $times) {
+                    $start = !empty($times['start']) ? $times['start'] . ':00' : '08:00:00';
+                    $end = !empty($times['end']) ? $times['end'] . ':00' : '17:00:00';
+
+                    $pdb->query("
+                        INSERT INTO {$tb_noc} (day_of_week, start_time, end_time)
+                        VALUES (?, ?, ?)
+                        ON DUPLICATE KEY UPDATE start_time = ?, end_time = ?
+                    ", [(int)$dow, $start, $end, $start, $end]);
+                }
+
+                redirect(url_for('oncall_settings') . '&msg=' . urlencode('NOC business hours overlay updated.'));
+            }
+        }
+
+        oncall_render_settings_page();
+    });
+
+    register_route('oncall_api_events', function() {
+        header('Content-Type: application/json');
+
+        if (!has_permission('view_schedule')) {
+            echo json_encode([]);
+            exit;
+        }
+
+        $department_id = $_GET['department_id'] ?? null;
+        if (!$department_id) {
+            echo json_encode([]);
+            exit;
+        }
+
+        $start_str = $_GET['start'] ?? date('Y-m-d H:i:s', strtotime('-1 month'));
+        $end_str = $_GET['end'] ?? date('Y-m-d H:i:s', strtotime('+1 month'));
+
+        $segments = oncall_get_final_schedule_for_department($department_id, $start_str, $end_str);
+
+        $events = [];
+        foreach ($segments as $seg) {
+            $events[] = [
+                'id' => $seg['id'],
+                'title' => $seg['display_name'] . ($seg['is_override'] ? ' (' . $seg['description'] . ')' : ''),
+                'start' => date('c', $seg['start']),
+                'end' => date('c', $seg['end']),
+                'color' => $seg['is_override'] ? '#dc3545' : '#0d6efd',
+                'extendedProps' => [
+                    'description' => $seg['description']
+                ]
+            ];
+        }
+
+        echo json_encode($events);
+        exit;
+    });
+});
+
+/* =========================================================
+ * DASHBOARD HOME WIDGET
+ * ========================================================= */
+
+add_action('index_dashboard_widgets', function($user_context) {
+    if (!has_permission('view_schedule')) {
+        return;
     }
+
+    $current_user_id = $user_context['user_id'] ?? null;
+    $departments = oncall_get_all_departments();
+    $upcoming_shifts = $current_user_id ? oncall_get_upcoming_user_shifts($current_user_id, 3) : [];
+    ?>
+    <div class="col-md-6 mb-4">
+        <div class="card h-100 shadow-sm border-0 border-start border-4 border-primary">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+                <h5 class="card-title mb-0 text-primary">
+                    <i class="bi bi-telephone-inbound me-2"></i>Current On-Call Contacts
+                </h5>
+                <a href="<?php echo url_for('oncall_calendar'); ?>" class="btn btn-sm btn-outline-primary">View Full Calendar</a>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush mb-3">
+                    <?php if (empty($departments)): ?>
+                        <div class="list-group-item text-muted">No departments configured.</div>
+                    <?php else: ?>
+                        <?php foreach ($departments as $dept): ?>
+                            <?php
+                            $now_oncall = oncall_get_current_on_call($dept['id'], time());
+                            ?>
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                <div>
+                                    <strong><?php echo htmlspecialchars($dept['name']); ?></strong>
+                                    <?php if (!empty($dept['noc_mode'])): ?>
+                                        <span class="badge bg-warning text-dark ms-1">NOC Active</span>
+                                    <?php endif; ?>
+                                </div>
+                                <div>
+                                    <?php if ($now_oncall): ?>
+                                        <span class="badge bg-success p-2">
+                                            <i class="bi bi-person-check-fill me-1"></i>
+                                            <?php echo htmlspecialchars($now_oncall['display_name']); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary p-2">Unassigned</span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+
+                <?php if ($current_user_id && !empty($upcoming_shifts)): ?>
+                    <div class="border-top pt-3">
+                        <h6 class="fw-bold mb-2 text-dark"><i class="bi bi-calendar-check me-1"></i>Your Next On-Call Shifts:</h6>
+                        <ul class="list-unstyled mb-0 small">
+                            <?php foreach ($upcoming_shifts as $shift): ?>
+                                <li class="mb-1 text-muted">
+                                    <i class="bi bi-clock me-1 text-primary"></i>
+                                    <strong><?php echo htmlspecialchars($shift['department_name']); ?>:</strong>
+                                    <?php echo date('M d, H:i', strtotime($shift['start_time'])); ?> &rarr; <?php echo date('M d, H:i', strtotime($shift['end_time'])); ?>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <?php
 });
-
-// 3. Register background Cron Task syncs
-require_once __DIR__ . '/../../Scheduler.php';
-
-// Telephony forward sync callback task
-Scheduler::getInstance()->registerTask(
-    'commportal_telephony_sync',
-    'oncall_sync_commportal_background',
-    3600, // hourly
-    'oncall-manager'
-);
-
-// Zabbix API periodic sync callback task
-Scheduler::getInstance()->registerTask(
-    'zabbix_api_user_sync',
-    'oncall_sync_zabbix_via_api',
-    3600, // hourly
-    'oncall-manager'
-);
-
-// Zabbix User Group membership auto-assignment update task (runs every 5 minutes)
-Scheduler::getInstance()->registerTask(
-    'zabbix_group_auto_assign',
-    'oncall_sync_all_departments_zabbix_groups',
-    300, // every 5 minutes
-    'oncall-manager'
-);
-
-// 4. Register Activation Event Hook (creates tables and seeds defaults)
-PluginManager::getInstance()->addAction('activate_plugin_oncall-manager', function () {
-    $pdb = new PluginDatabase('oncall-manager');
-
-    // 1. Create Departments table
-    $pdb->createTable('departments', "
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) NOT NULL UNIQUE,
-        manager_user_id INT DEFAULT NULL,
-        noc_mode TINYINT(1) DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ");
-
-    // 2. Create Department Users table
-    $pdb->createTable('department_users', "
-        department_id INT NOT NULL,
-        user_id INT NOT NULL,
-        PRIMARY KEY (department_id, user_id)
-    ");
-
-    // 3. Create Schedule Slots table
-    $pdb->createTable('schedule_slots', "
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        department_id INT NOT NULL,
-        user_id INT NOT NULL,
-        start_time DATETIME NOT NULL,
-        end_time DATETIME NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_dept_time (department_id, start_time, end_time)
-    ");
-
-    // 4. Create Overrides table
-    $pdb->createTable('overrides', "
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        department_id INT NOT NULL,
-        user_id INT NOT NULL,
-        start_time DATETIME NOT NULL,
-        end_time DATETIME NOT NULL,
-        description VARCHAR(255),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_override_dept_time (department_id, start_time, end_time)
-    ");
-
-    // 5. Create Trade Requests table
-    $pdb->createTable('trade_requests', "
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        department_id INT NOT NULL,
-        proposing_user_id INT NOT NULL,
-        accepting_user_id INT DEFAULT NULL,
-        offered_slot_id INT NOT NULL,
-        counter_slot_id INT DEFAULT NULL,
-        status VARCHAR(50) NOT NULL DEFAULT 'open',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ");
-
-    // 6. Create NOC Business Hours table
-    $pdb->createTable('noc_business_hours', "
-        day_of_week INT NOT NULL PRIMARY KEY,
-        start_time TIME NOT NULL,
-        end_time TIME NOT NULL
-    ");
-
-    // Seed Business Hours
-    $db = get_db_connection();
-    $tb_noc = $pdb->getTableName('noc_business_hours');
-    for ($i = 1; $i <= 7; $i++) {
-        $db->exec("INSERT IGNORE INTO {$tb_noc} (day_of_week, start_time, end_time) VALUES ({$i}, '08:00:00', '18:00:00')");
-    }
-
-    // 7. Create CommPortal accounts table
-    $pdb->createTable('commportal_accounts', "
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        department_id INT NOT NULL,
-        phone_number VARCHAR(50) NOT NULL,
-        password VARCHAR(100) NOT NULL,
-        ext VARCHAR(20) DEFAULT NULL,
-        last_forwarded_phone VARCHAR(50) DEFAULT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ");
-
-    // 8. Create Plugin-Specific Settings table
-    $pdb->createTable('settings', "
-        setting_key VARCHAR(100) NOT NULL PRIMARY KEY,
-        setting_value TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ");
-
-    // Seed Plugin specific Settings
-    $tb_settings = $pdb->getTableName('settings');
-    $db->exec("INSERT IGNORE INTO {$tb_settings} (setting_key, setting_value) VALUES ('commportal_base_url', 'https://endpoint/')");
-    $db->exec("INSERT IGNORE INTO {$tb_settings} (setting_key, setting_value) VALUES ('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php')");
-    $db->exec("INSERT IGNORE INTO {$tb_settings} (setting_key, setting_value) VALUES ('zabbix_api_token', 'mock_zabbix_api_token_value_here')");
-
-    // 9. Create Zabbix to Local Users Mapping table
-    $pdb->createTable('zabbix_user_map', "
-        zabbix_userid BIGINT NOT NULL PRIMARY KEY,
-        local_user_id INT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ");
-
-    // 10. Create Department Zabbix Groups table
-    $pdb->createTable('department_zabbix_groups', "
-        department_id INT NOT NULL,
-        zabbix_usrgrp_id BIGINT NOT NULL,
-        last_oncall_userid BIGINT DEFAULT NULL,
-        PRIMARY KEY (department_id, zabbix_usrgrp_id)
-    ");
-
-    log_action('ON_CALL_MANAGER_ACTIVATION_SUCCESS', []);
-});
-
-// 5. Register Deactivation Hook (Drops dynamic tables safely)
-PluginManager::getInstance()->addAction('deactivate_plugin_oncall-manager', function () {
-    $pdb = new PluginDatabase('oncall-manager');
-    $pdb->dropTable('department_zabbix_groups');
-    $pdb->dropTable('zabbix_user_map');
-    $pdb->dropTable('settings');
-    $pdb->dropTable('commportal_accounts');
-    $pdb->dropTable('noc_business_hours');
-    $pdb->dropTable('trade_requests');
-    $pdb->dropTable('overrides');
-    $pdb->dropTable('schedule_slots');
-    $pdb->dropTable('department_users');
-    $pdb->dropTable('departments');
-
-    log_action('ON_CALL_MANAGER_DEACTIVATION_SUCCESS', []);
-});
-
-// 6. Register Views and Page Routes
-require_once __DIR__ . '/oncall-views.php';
