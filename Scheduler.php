@@ -161,7 +161,12 @@ class Scheduler
                 // Spawns an independent background sub-process of cron.php to run this task callback
                 // in parallel. Since it's run in the background, this loop proceeds immediately
                 // without waiting for the task to finish.
-                $php_bin = PHP_BINARY ? PHP_BINARY : 'php';
+                $php_bin = 'php';
+                if (defined('PHP_BINARY') && PHP_BINARY && strpos(PHP_BINARY, 'fpm') === false) {
+                    $php_bin = PHP_BINARY;
+                } elseif (file_exists('/usr/bin/php')) {
+                    $php_bin = '/usr/bin/php';
+                }
                 $script_path = __DIR__ . '/cron.php';
 
                 if (strpos(strtolower(PHP_OS), 'win') === 0) {

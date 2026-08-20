@@ -322,14 +322,34 @@ class PluginManager
         }
 
         $syntax_errors = [];
-        $php_bin = PHP_BINARY ? PHP_BINARY : 'php';
+        $php_bin = 'php';
+        if (defined('PHP_BINARY') && PHP_BINARY && strpos(PHP_BINARY, 'fpm') === false) {
+            $php_bin = PHP_BINARY;
+        } elseif (file_exists('/usr/bin/php')) {
+            $php_bin = '/usr/bin/php';
+        }
+
         foreach ($php_files as $f) {
             $rel_path = str_replace($pluginsDir . '/', '', $f);
             $output = [];
             $return_var = 0;
-            exec(escapeshellcmd("{$php_bin} -l " . escapeshellarg($f)), $output, $return_var);
-            if ($return_var !== 0) {
-                $syntax_errors[] = $rel_path . ': ' . implode(' ', $output);
+            @exec(escapeshellcmd("{$php_bin} -l " . escapeshellarg($f)), $output, $return_var);
+
+            $output_str = implode(' ', $output);
+            if ($return_var !== 0 || strpos($output_str, 'Usage:') !== false) {
+                // Fallback to native PHP token parser (TOKEN_PARSE)
+                try {
+                    $code = file_get_contents($f);
+                    if (defined('TOKEN_PARSE')) {
+                        token_get_all($code, TOKEN_PARSE);
+                    } else {
+                        token_get_all($code);
+                    }
+                } catch (ParseError $pe) {
+                    $syntax_errors[] = $rel_path . ': Parse error - ' . $pe->getMessage() . ' on line ' . $pe->getLine();
+                } catch (Throwable $t) {
+                    $syntax_errors[] = $rel_path . ': ' . $t->getMessage();
+                }
             }
         }
 
