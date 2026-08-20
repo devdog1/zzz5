@@ -1,5 +1,5 @@
 <?php
-// admin-plugins.php - Dedicated Module Discovery, Enablement, and Cron Tasks Monitor Page
+// admin-plugins.php - Dedicated Module Discovery, Enablement, Cron Tasks, and Verbose Compatibility Inspector
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/Scheduler.php';
 
@@ -14,8 +14,9 @@ if (!has_permission('manage_plugins')) {
 $scheduler = Scheduler::getInstance();
 $msg = '';
 $err = '';
+$inspection_report = null;
 
-// Handle Activation, Deactivation, and Manual Cron triggers
+// Handle Activation, Deactivation, Manual Cron triggers, and Compatibility Inspection
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf();
     $action = $_POST['action'] ?? '';
@@ -26,7 +27,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = "Module <strong>" . htmlspecialchars($slug) . "</strong> has been successfully activated!";
             log_action('ACTIVATE_PLUGIN', ['slug' => $slug]);
         } else {
-            // Retrieve global err if any
             global $err;
             $err = $err ?: "Failed to activate module <strong>" . htmlspecialchars($slug) . "</strong>.";
         }
@@ -38,6 +38,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $err = "Failed to deactivate module <strong>" . htmlspecialchars($slug) . "</strong>.";
         }
+    } elseif ($action === 'inspect') {
+        $slug = $_POST['plugin_slug'] ?? '';
+        $inspection_report = $pluginManager->inspectPlugin($slug);
+        log_action('INSPECT_PLUGIN', ['slug' => $slug, 'compatible' => $inspection_report['compatible']]);
     } elseif ($action === 'trigger_cron') {
         try {
             $scheduler->runPendingTasks();
@@ -59,7 +63,7 @@ require_once __DIR__ . '/header.php';
 <div class="row mb-4">
     <div class="col-md-12">
         <h1 class="h2"><i class="fa-solid fa-puzzle-piece text-info me-2"></i>Module & Extension Manager</h1>
-        <p class="text-muted">Discover new pluggable features, toggle dynamic extensions, register custom roles, and monitor background crons.</p>
+        <p class="text-muted">Discover new pluggable features, verify plugin compatibility with full diagnostic reports, toggle dynamic extensions, and monitor background crons.</p>
     </div>
 </div>
 
@@ -74,6 +78,78 @@ require_once __DIR__ . '/header.php';
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
         <i class="fa-solid fa-triangle-exclamation me-1"></i> <?= $err ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<!-- Diagnostic Report Section -->
+<?php if ($inspection_report): ?>
+    <div class="card shadow-sm border-<?= $inspection_report['compatible'] ? 'success' : 'danger' ?> mb-4">
+        <div class="card-header bg-<?= $inspection_report['compatible'] ? 'success' : 'danger' ?> text-white d-flex justify-content-between align-items-center py-3">
+            <h5 class="mb-0">
+                <i class="fa-solid fa-microscope me-2"></i>
+                Plugin Compatibility & Test Activation Report: <strong><?= htmlspecialchars($inspection_report['meta']['name'] ?? $inspection_report['slug']) ?></strong>
+            </h5>
+            <span class="badge bg-light text-<?= $inspection_report['compatible'] ? 'success' : 'danger' ?> fs-6">
+                <?= $inspection_report['compatible'] ? '<i class="fa-solid fa-circle-check me-1"></i> Compatible' : '<i class="fa-solid fa-triangle-exclamation me-1"></i> Issues Detected' ?>
+            </span>
+        </div>
+        <div class="card-body">
+            <div class="row g-4">
+                <div class="col-md-7">
+                    <h6 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="fa-solid fa-list-check me-2 text-primary"></i>Diagnostic Checks Performed:</h6>
+                    <div class="list-group list-group-flush">
+                        <?php foreach ($inspection_report['checks'] as $chk): ?>
+                            <div class="list-group-item d-flex align-items-start px-0 py-2">
+                                <div class="me-3 mt-1">
+                                    <?php if ($chk['status'] === 'pass'): ?>
+                                        <i class="fa-solid fa-circle-check text-success fs-5"></i>
+                                    <?php elseif ($chk['status'] === 'warn'): ?>
+                                        <i class="fa-solid fa-triangle-exclamation text-warning fs-5"></i>
+                                    <?php else: ?>
+                                        <i class="fa-solid fa-circle-xmark text-danger fs-5"></i>
+                                    <?php endif; ?>
+                                </div>
+                                <div>
+                                    <strong class="d-block text-dark"><?= htmlspecialchars($chk['title']) ?></strong>
+                                    <small class="text-muted"><?= htmlspecialchars($chk['message']) ?></small>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <div class="col-md-5">
+                    <div class="border rounded p-3 bg-light h-100">
+                        <h6 class="fw-bold text-dark border-bottom pb-2 mb-3"><i class="fa-solid fa-gears me-2 text-info"></i>Expected Activation Actions & Changes:</h6>
+                        <?php if (empty($inspection_report['expected_changes'])): ?>
+                            <p class="text-muted small">No database schema, permission, or role changes declared for this plugin.</p>
+                        <?php else: ?>
+                            <ul class="list-unstyled mb-0 small">
+                                <?php foreach ($inspection_report['expected_changes'] as $change): ?>
+                                    <li class="mb-2 text-secondary">
+                                        <i class="fa-solid fa-arrow-right-long text-primary me-2"></i><?= htmlspecialchars($change) ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+
+                        <div class="mt-4 pt-3 border-top d-flex gap-2">
+                            <?php if ($inspection_report['compatible']): ?>
+                                <form method="POST" class="m-0">
+                                    <?php csrf_field(); ?>
+                                    <input type="hidden" name="plugin_slug" value="<?= htmlspecialchars($inspection_report['slug']) ?>">
+                                    <input type="hidden" name="action" value="activate">
+                                    <button type="submit" class="btn btn-sm btn-success">
+                                        <i class="fa-solid fa-bolt me-1"></i>Proceed with Activation
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                            <a href="admin-plugins.php" class="btn btn-sm btn-outline-secondary">Dismiss Report</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 <?php endif; ?>
 
@@ -122,6 +198,15 @@ require_once __DIR__ . '/header.php';
                                             <form method="POST" class="m-0 d-inline-block">
                                                 <?php csrf_field(); ?>
                                                 <input type="hidden" name="plugin_slug" value="<?= htmlspecialchars($slug) ?>">
+                                                <input type="hidden" name="action" value="inspect">
+                                                <button type="submit" class="btn btn-sm btn-outline-info me-1" title="Run Verbose Compatibility Inspector">
+                                                    <i class="fa-solid fa-stethoscope me-1"></i>Check Compatibility
+                                                </button>
+                                            </form>
+
+                                            <form method="POST" class="m-0 d-inline-block">
+                                                <?php csrf_field(); ?>
+                                                <input type="hidden" name="plugin_slug" value="<?= htmlspecialchars($slug) ?>">
                                                 <?php if ($meta['active']): ?>
                                                     <input type="hidden" name="action" value="deactivate">
                                                     <button type="submit" class="btn btn-sm btn-outline-danger">
@@ -149,9 +234,11 @@ require_once __DIR__ . '/header.php';
     <div class="col-lg-4">
         <div class="card shadow-sm border-info mb-4">
             <div class="card-header bg-info text-dark">
-                <i class="fa-solid fa-circle-info me-2"></i>Extension Info
+                <i class="fa-solid fa-circle-info me-2"></i>Extension Info & Testing
             </div>
             <div class="card-body small">
+                <h6>Verbose Compatibility Checker:</h6>
+                <p class="text-muted mb-3">Click <strong>Check Compatibility</strong> on any plugin to run a dry-run diagnostic test verifying syntax, permission namespaces, role collisions, and database SQL scripts before activation.</p>
                 <h6>Dynamic RBAC Integration:</h6>
                 <p class="text-muted mb-3">Activating a module automatically registers its declared custom Permissions and Roles in the centralized database directories, making them instantly visible inside the <strong>Users & RBAC</strong> panel.</p>
                 <h6>Database Prefix Sandbox:</h6>

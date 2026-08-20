@@ -263,6 +263,221 @@ class PluginManager
         return in_array($slug, $this->activePlugins);
     }
 
+    /**
+     * Perform a comprehensive dry-run compatibility inspection and analysis of a plugin.
+     * Returns a full diagnostic report including checks, expected changes, and compatibility verdict.
+     */
+    public function inspectPlugin($slug)
+    {
+        $pluginsDir = __DIR__ . '/plugins';
+        $pluginDir = $pluginsDir . '/' . $slug;
+        $pluginFile = $pluginDir . '/plugin.php';
+
+        $report = [
+            'slug' => $slug,
+            'compatible' => true,
+            'meta' => [],
+            'checks' => [],
+            'expected_changes' => []
+        ];
+
+        // 1. File existence check
+        if (!file_exists($pluginFile)) {
+            $report['compatible'] = false;
+            $report['checks'][] = [
+                'type' => 'file_structure',
+                'status' => 'fail',
+                'title' => 'Entry File missing',
+                'message' => "Expected plugin entry file at 'plugins/{$slug}/plugin.php' was not found."
+            ];
+            return $report;
+        }
+
+        $report['checks'][] = [
+            'type' => 'file_structure',
+            'status' => 'pass',
+            'title' => 'Entry File Present',
+            'message' => "Plugin entry file 'plugins/{$slug}/plugin.php' located successfully."
+        ];
+
+        // 2. Metadata parsing
+        $meta = $this->parsePluginHeader($pluginFile);
+        $report['meta'] = $meta;
+
+        $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
+        $required_prefix = $clean_slug . '_';
+
+        // 3. Syntax checks on PHP files
+        $php_files = [$pluginFile];
+        foreach (['models', 'views', 'tasks'] as $sub_dir) {
+            $d = $pluginDir . '/' . $sub_dir;
+            if (is_dir($d)) {
+                $items = scandir($d);
+                foreach ($items as $item) {
+                    if (pathinfo($item, PATHINFO_EXTENSION) === 'php') {
+                        $php_files[] = $d . '/' . $item;
+                    }
+                }
+            }
+        }
+
+        $syntax_errors = [];
+        $php_bin = PHP_BINARY ? PHP_BINARY : 'php';
+        foreach ($php_files as $f) {
+            $rel_path = str_replace($pluginsDir . '/', '', $f);
+            $output = [];
+            $return_var = 0;
+            exec(escapeshellcmd("{$php_bin} -l " . escapeshellarg($f)), $output, $return_var);
+            if ($return_var !== 0) {
+                $syntax_errors[] = $rel_path . ': ' . implode(' ', $output);
+            }
+        }
+
+        if (!empty($syntax_errors)) {
+            $report['compatible'] = false;
+            $report['checks'][] = [
+                'type' => 'syntax',
+                'status' => 'fail',
+                'title' => 'PHP Syntax Check',
+                'message' => "Syntax errors detected: " . implode('; ', $syntax_errors)
+            ];
+        } else {
+            $report['checks'][] = [
+                'type' => 'syntax',
+                'status' => 'pass',
+                'title' => 'PHP Syntax Check',
+                'message' => "All " . count($php_files) . " PHP files passed lint/syntax validation without errors."
+            ];
+        }
+
+        // 4. Permission collision check
+        $db = get_db_connection();
+        $perms_to_register = [];
+        if (!empty($meta['permissions'])) {
+            $perm_list = array_map('trim', explode(',', $meta['permissions']));
+            foreach ($perm_list as $perm_raw) {
+                $clean_perm = preg_replace('/[^a-zA-Z0-9_]/', '', $perm_raw);
+                if (strpos($clean_perm, $required_prefix) !== 0) {
+                    $clean_perm = $required_prefix . $clean_perm;
+                }
+                $perms_to_register[] = $clean_perm;
+
+                if (!$this->isPluginActive($slug)) {
+                    $stmt = $db->prepare("SELECT id FROM permissions WHERE permission_name = ?");
+                    $stmt->execute([$clean_perm]);
+                    if ($stmt->fetch()) {
+                        $report['compatible'] = false;
+                        $report['checks'][] = [
+                            'type' => 'permissions',
+                            'status' => 'fail',
+                            'title' => 'Permission Name Conflict',
+                            'message' => "Permission '{$clean_perm}' is already registered in the database by another module."
+                        ];
+                    }
+                }
+            }
+
+            if (!empty($perms_to_register)) {
+                $report['expected_changes'][] = "Register " . count($perms_to_register) . " dynamic permissions: " . implode(', ', $perms_to_register);
+                $report['checks'][] = [
+                    'type' => 'permissions',
+                    'status' => 'pass',
+                    'title' => 'Permission Namespace Inspection',
+                    'message' => "Permissions properly prefixed with '{$required_prefix}' namespace."
+                ];
+            }
+        }
+
+        // 5. Role collision check
+        if (!empty($meta['roles'])) {
+            $roles_list = array_map('trim', explode(';', $meta['roles']));
+            $roles_to_register = [];
+            foreach ($roles_list as $role_expr) {
+                if (strpos($role_expr, ':') === false) continue;
+                list($role_raw, $role_perms_raw) = explode(':', $role_expr, 2);
+                $clean_role = preg_replace('/[^a-zA-Z0-9_]/', '', trim($role_raw));
+                if (strpos($clean_role, $required_prefix) !== 0) {
+                    $clean_role = $required_prefix . $clean_role;
+                }
+                $roles_to_register[] = $clean_role;
+
+                if (!$this->isPluginActive($slug)) {
+                    $stmt = $db->prepare("SELECT id FROM roles WHERE role_name = ?");
+                    $stmt->execute([$clean_role]);
+                    if ($stmt->fetch()) {
+                        $report['compatible'] = false;
+                        $report['checks'][] = [
+                            'type' => 'roles',
+                            'status' => 'fail',
+                            'title' => 'Role Name Conflict',
+                            'message' => "Role '{$clean_role}' is already registered in the database by another module."
+                        ];
+                    }
+                }
+            }
+
+            if (!empty($roles_to_register)) {
+                $report['expected_changes'][] = "Provision " . count($roles_to_register) . " dynamic roles: " . implode(', ', $roles_to_register);
+                $report['checks'][] = [
+                    'type' => 'roles',
+                    'status' => 'pass',
+                    'title' => 'Role Namespace Inspection',
+                    'message' => "Roles properly prefixed with '{$required_prefix}' namespace."
+                ];
+            }
+        }
+
+        // 6. SQL installation inspection
+        $install_sql_file = $pluginDir . '/sql/install.sql';
+        if (file_exists($install_sql_file)) {
+            $sql_content = file_get_contents($install_sql_file);
+            $expected_prefix = 'plug_' . str_replace('-', '_', $slug) . '_';
+
+            // Check for table creation statements
+            if (preg_match_all('/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\']?([a-zA-Z0-9_{}]+)[`\']?/i', $sql_content, $matches)) {
+                $tables = $matches[1];
+                $resolved_tables = [];
+                foreach ($tables as $tb) {
+                    $resolved_tb = str_replace('{prefix}', $expected_prefix, $tb);
+                    $resolved_tables[] = $resolved_tb;
+
+                    // Verify namespace compliance
+                    if (strpos($resolved_tb, $expected_prefix) !== 0) {
+                        $report['compatible'] = false;
+                        $report['checks'][] = [
+                            'type' => 'database',
+                            'status' => 'fail',
+                            'title' => 'SQL Namespace Violation',
+                            'message' => "Table '{$resolved_tb}' does not use required plugin prefix '{$expected_prefix}'."
+                        ];
+                    }
+                }
+
+                if (!empty($resolved_tables)) {
+                    $report['expected_changes'][] = "Create/Ensure database tables: " . implode(', ', $resolved_tables);
+                    $report['checks'][] = [
+                        'type' => 'database',
+                        'status' => 'pass',
+                        'title' => 'Database Schema Inspection',
+                        'message' => "SQL schema file verified with proper prefixing '{$expected_prefix}'."
+                    ];
+                }
+            }
+        }
+
+        // 7. Overall verdict check
+        if ($report['compatible']) {
+            $report['checks'][] = [
+                'type' => 'verdict',
+                'status' => 'pass',
+                'title' => 'Full Compatibility Verified',
+                'message' => "Plugin '{$meta['name']}' is fully compatible with this Base Framework."
+            ];
+        }
+
+        return $report;
+    }
+
     public function activatePlugin($slug)
     {
         if ($this->isPluginActive($slug)) return true;
