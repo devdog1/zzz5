@@ -17,52 +17,6 @@ if (isset($_POST['azure_login'])) {
         $error = "Azure Login failed to initiate: " . $e->getMessage();
     }
 }
-
-// Support mock local login for development/testing if configured
-$is_dev = true; // Set to true to allow testing without live Azure tenant credentials
-if ($is_dev && isset($_POST['dev_login'])) {
-    $dev_user = trim($_POST['dev_user'] ?? 'admin@example.com');
-
-    try {
-        $db = get_db_connection();
-        $stmt = $db->prepare("SELECT id, display_name FROM users WHERE username = ?");
-        $stmt->execute([$dev_user]);
-        $user = $stmt->fetch();
-
-        if (!$user) {
-            // Provision mock user
-            $stmt = $db->prepare("
-                INSERT INTO users (username, email, display_name, auto_provisioned)
-                VALUES (?, ?, ?, 1)
-            ");
-            $name_parts = explode('@', $dev_user);
-            $stmt->execute([$dev_user, $dev_user, ucfirst($name_parts[0])]);
-            $userId = (int)$db->lastInsertId();
-
-            // Assign default/admin roles
-            $stmt = $db->prepare("INSERT IGNORE INTO user_roles (user_id, role_id) VALUES (?, ?)");
-            $stmt->execute([$userId, 1]); // Admin
-        } else {
-            $userId = (int)$user['id'];
-        }
-
-        $_SESSION['user_id'] = $userId;
-        $_SESSION['user'] = [
-            'azure_oid' => 'mock_oid_' . $userId,
-            'email'     => $dev_user,
-            'name'      => $user ? $user['display_name'] : ucfirst(explode('@', $dev_user)[0]),
-            'groups'    => ['Admins']
-        ];
-
-        $_SESSION['roles'] = get_auth()->getRoles($userId, ['Admins']);
-        $_SESSION['permissions'] = get_auth()->getPermissions($userId, ['Admins']);
-
-        header("Location: index.php");
-        exit;
-    } catch (Exception $e) {
-        $error = "Mock Login failed: " . $e->getMessage();
-    }
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -105,26 +59,12 @@ if ($is_dev && isset($_POST['dev_login'])) {
         </div>
     <?php endif; ?>
 
-    <!-- Real Azure Login -->
-    <form method="POST" class="mb-3">
+    <!-- Azure SSO Login -->
+    <form method="POST">
         <button type="submit" name="azure_login" class="btn btn-primary btn-lg w-100 d-flex align-items-center justify-content-center">
             <i class="fa-brands fa-microsoft me-2"></i> Sign in with Microsoft Azure
         </button>
     </form>
-
-    <?php if ($is_dev): ?>
-        <div class="border-top pt-3 mt-3">
-            <p class="text-muted text-center small">Local Development Mock Login</p>
-            <form method="POST">
-                <div class="mb-2">
-                    <input type="email" name="dev_user" class="form-control form-control-sm" value="admin@example.com" placeholder="Email Address">
-                </div>
-                <button type="submit" name="dev_login" class="btn btn-secondary btn-sm w-100">
-                    <i class="fa-solid fa-terminal me-1"></i> Mock Developer Login
-                </button>
-            </form>
-        </div>
-    <?php endif; ?>
 </div>
 
 </body>

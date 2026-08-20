@@ -4,14 +4,12 @@
  * Description: Enterprise On-Call Rotation, Shift Trade Center, Manual Overrides, Metaswitch CommPortal & Zabbix Integration.
  * Version: 2.1
  * Author: DevDog
- * Roles: Manager, Operator, Viewer
- * Role_Permissions_Manager: manage_schedule, manage_trades, manage_departments, manage_settings, manage_telephony, view_schedule
- * Role_Permissions_Operator: manage_trades, view_schedule
- * Role_Permissions_Viewer: view_schedule
+ * Permissions: view_schedule, manage_schedule, manage_trades, manage_departments, manage_telephony, manage_settings
+ * Roles: manager:view_schedule,manage_schedule,manage_trades,manage_departments,manage_telephony,manage_settings; operator:view_schedule,manage_trades; viewer:view_schedule
  */
 
 if (!defined('APP_ROOT')) {
-    die('Direct access not permitted.');
+    define('APP_ROOT', __DIR__ . '/../../');
 }
 
 // Load Plugin Models
@@ -43,7 +41,6 @@ function oncall_plugin_install_tables() {
         $db = get_db_connection();
         $sql = file_get_contents($install_sql_file);
 
-        // Substitute {prefix} with real plugin table prefix (plug_oncall_manager_)
         $sql = str_replace('{prefix}', $pdb->getPrefix(), $sql);
         $db->exec($sql);
     }
@@ -67,34 +64,35 @@ function oncall_plugin_uninstall_tables() {
  * ========================================================= */
 
 add_filter('theme_nav_links', function($nav) {
-    if (!has_permission('view_schedule')) {
+    if (!has_permission('view_schedule') && !has_permission('oncall_manager_view_schedule')) {
         return $nav;
     }
 
     $oncall_menu = [
-        'title' => '<i class="bi bi-telephone-inbound me-1"></i> On-Call Schedule',
-        'url' => url_for('oncall_calendar'),
+        'label' => 'On-Call Schedule',
+        'icon' => 'fa-solid fa-phone-volume',
+        'route' => 'oncall_calendar',
         'children' => [
-            ['title' => 'Rotation Calendar', 'url' => url_for('oncall_calendar')],
-            ['title' => 'Shift Trade Center', 'url' => url_for('oncall_trades')]
+            ['label' => 'Rotation Calendar', 'icon' => 'fa-solid fa-calendar-days', 'route' => 'oncall_calendar'],
+            ['label' => 'Shift Trade Center', 'icon' => 'fa-solid fa-handshake', 'route' => 'oncall_trades']
         ]
     ];
 
-    if (has_permission('manage_schedule')) {
-        $oncall_menu['children'][] = ['title' => 'Manual Overrides', 'url' => url_for('oncall_overrides')];
-        $oncall_menu['children'][] = ['title' => '365-Day Shift Generator', 'url' => url_for('oncall_generate')];
+    if (has_permission('manage_schedule') || has_permission('oncall_manager_manage_schedule')) {
+        $oncall_menu['children'][] = ['label' => 'Manual Overrides', 'icon' => 'fa-solid fa-calendar-minus', 'route' => 'oncall_overrides'];
+        $oncall_menu['children'][] = ['label' => '365-Day Shift Generator', 'icon' => 'fa-solid fa-wand-magic-sparkles', 'route' => 'oncall_generate'];
     }
 
-    if (has_permission('manage_departments')) {
-        $oncall_menu['children'][] = ['title' => 'Department Management', 'url' => url_for('oncall_departments')];
+    if (has_permission('manage_departments') || has_permission('oncall_manager_manage_departments')) {
+        $oncall_menu['children'][] = ['label' => 'Department Management', 'icon' => 'fa-solid fa-building-user', 'route' => 'oncall_departments'];
     }
 
-    if (has_permission('manage_telephony')) {
-        $oncall_menu['children'][] = ['title' => 'CommPortal Telephony', 'url' => url_for('oncall_telephony')];
+    if (has_permission('manage_telephony') || has_permission('oncall_manager_manage_telephony')) {
+        $oncall_menu['children'][] = ['label' => 'CommPortal Telephony', 'icon' => 'fa-solid fa-headset', 'route' => 'oncall_telephony'];
     }
 
-    if (has_permission('manage_settings')) {
-        $oncall_menu['children'][] = ['title' => 'Plugin Settings', 'url' => url_for('oncall_settings')];
+    if (has_permission('manage_settings') || has_permission('oncall_manager_manage_settings')) {
+        $oncall_menu['children'][] = ['label' => 'Plugin Settings', 'icon' => 'fa-solid fa-gears', 'route' => 'oncall_settings'];
     }
 
     $nav[] = $oncall_menu;
@@ -108,23 +106,23 @@ add_filter('theme_nav_links', function($nav) {
 add_action('init_scheduler', function($scheduler) {
     $scheduler->registerTask(
         'oncall_commportal_sync',
-        'CommPortal Telephony Sync',
-        '* * * * *',
-        'oncall_task_commportal_sync'
+        'oncall_task_commportal_sync',
+        60,
+        'oncall-manager'
     );
 
     $scheduler->registerTask(
         'oncall_zabbix_sync',
-        'Zabbix API Users Sync',
-        '0 * * * *',
-        'oncall_task_zabbix_sync'
+        'oncall_task_zabbix_sync',
+        3600,
+        'oncall-manager'
     );
 
     $scheduler->registerTask(
         'oncall_zabbix_group_assign',
-        'Zabbix On-Call Group Auto-Assignment',
-        '* * * * *',
-        'oncall_task_zabbix_group_assign'
+        'oncall_task_zabbix_group_assign',
+        60,
+        'oncall-manager'
     );
 });
 
@@ -134,12 +132,12 @@ add_action('init_scheduler', function($scheduler) {
 
 add_action('register_routes', function() {
     register_route('oncall_calendar', function() {
-        if (!has_permission('view_schedule')) die('Access Denied');
+        if (!has_permission('view_schedule') && !has_permission('oncall_manager_view_schedule')) die('Access Denied');
         oncall_render_calendar_page();
     });
 
     register_route('oncall_trades', function() {
-        if (!has_permission('manage_trades')) die('Access Denied');
+        if (!has_permission('manage_trades') && !has_permission('oncall_manager_manage_trades')) die('Access Denied');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             csrf_verify();
@@ -182,7 +180,7 @@ add_action('register_routes', function() {
     });
 
     register_route('oncall_overrides', function() {
-        if (!has_permission('manage_schedule')) die('Access Denied');
+        if (!has_permission('manage_schedule') && !has_permission('oncall_manager_manage_schedule')) die('Access Denied');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             csrf_verify();
@@ -208,7 +206,7 @@ add_action('register_routes', function() {
     });
 
     register_route('oncall_departments', function() {
-        if (!has_permission('manage_departments')) die('Access Denied');
+        if (!has_permission('manage_departments') && !has_permission('oncall_manager_manage_departments')) die('Access Denied');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             csrf_verify();
@@ -255,7 +253,7 @@ add_action('register_routes', function() {
     });
 
     register_route('oncall_telephony', function() {
-        if (!has_permission('manage_telephony')) die('Access Denied');
+        if (!has_permission('manage_telephony') && !has_permission('oncall_manager_manage_telephony')) die('Access Denied');
 
         $pdb = oncall_get_pdb();
         $tb_accounts = $pdb->getTableName('commportal_accounts');
@@ -287,7 +285,7 @@ add_action('register_routes', function() {
     });
 
     register_route('oncall_generate', function() {
-        if (!has_permission('manage_schedule')) die('Access Denied');
+        if (!has_permission('manage_schedule') && !has_permission('oncall_manager_manage_schedule')) die('Access Denied');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             csrf_verify();
@@ -311,7 +309,7 @@ add_action('register_routes', function() {
     });
 
     register_route('oncall_settings', function() {
-        if (!has_permission('manage_settings')) die('Access Denied');
+        if (!has_permission('manage_settings') && !has_permission('oncall_manager_manage_settings')) die('Access Denied');
 
         $pdb = oncall_get_pdb();
         $tb_noc = $pdb->getTableName('noc_business_hours');
@@ -351,7 +349,7 @@ add_action('register_routes', function() {
     register_route('oncall_api_events', function() {
         header('Content-Type: application/json');
 
-        if (!has_permission('view_schedule')) {
+        if (!has_permission('view_schedule') && !has_permission('oncall_manager_view_schedule')) {
             echo json_encode([]);
             exit;
         }
@@ -391,7 +389,7 @@ add_action('register_routes', function() {
  * ========================================================= */
 
 add_action('index_dashboard_widgets', function($user_context) {
-    if (!has_permission('view_schedule')) {
+    if (!has_permission('view_schedule') && !has_permission('oncall_manager_view_schedule')) {
         return;
     }
 
