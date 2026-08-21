@@ -80,6 +80,8 @@ foreach ($registered_tasks as $scoped_key => $task_info) {
     $merged_tasks[$scoped_key] = $db_row;
 }
 
+$failed_tasks = $scheduler->getFailedTasksByPlugin();
+$boot_errors = $pluginManager->getPluginErrors();
 $logs = $scheduler->getRecentExecutionLogs(30);
 
 $days_map = [
@@ -105,6 +107,25 @@ require_once __DIR__ . '/header.php';
         </form>
     </div>
 </div>
+
+<?php if (!empty($failed_tasks) || !empty($boot_errors)): ?>
+    <div class="alert alert-danger shadow-sm mb-4 text-start" role="alert">
+        <h5 class="alert-heading h6 fw-bold mb-2">
+            <i class="fa-solid fa-shield-halved me-2"></i>Plugin Safeguard Alert: Isolated Errors Detected
+        </h5>
+        <p class="mb-2 small">The platform isolated errors in the following plugin(s) to prevent impacting core system functions or other plugins' tasks:</p>
+        <ul class="mb-0 small ps-3">
+            <?php foreach ($boot_errors as $slug => $err_text): ?>
+                <li><strong>Module '<?= htmlspecialchars($slug) ?>' Boot Error:</strong> <?= htmlspecialchars($err_text) ?></li>
+            <?php endforeach; ?>
+            <?php foreach ($failed_tasks as $slug => $tasks): ?>
+                <?php foreach ($tasks as $ft): ?>
+                    <li><strong>Module '<?= htmlspecialchars($slug) ?>' Task Failure (<code><?= htmlspecialchars($ft['task_key']) ?></code>):</strong> <?= htmlspecialchars($ft['error_message'] ?: 'Execution crashed') ?></li>
+                <?php endforeach; ?>
+            <?php endforeach; ?>
+        </ul>
+    </div>
+<?php endif; ?>
 
 <?php if ($msg): ?>
     <div class="alert alert-success alert-dismissible fade show text-start"><i class="fa-solid fa-circle-check me-1"></i> <?= $msg ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>

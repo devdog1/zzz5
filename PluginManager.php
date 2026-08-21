@@ -11,6 +11,7 @@ class PluginManager
     private $services = []; // Inter-Plugin Shared Service Registry
     private $activePlugins = [];
     private $pluginMeta = [];
+    private $pluginErrors = [];
 
     private function __construct()
     {
@@ -196,6 +197,16 @@ class PluginManager
     public function getActivePlugins()
     {
         return $this->activePlugins;
+    }
+
+    public function getPluginErrors()
+    {
+        return $this->pluginErrors;
+    }
+
+    public function getPluginError($slug)
+    {
+        return $this->pluginErrors[$slug] ?? null;
     }
 
     public function discoverPlugins()
@@ -703,11 +714,16 @@ class PluginManager
         foreach ($this->activePlugins as $slug) {
             $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
             if (file_exists($pluginFile)) {
-                // Wrap plugin booting to ensure faulty plugins don't break loading
+                // Wrap each plugin booting individually to ensure faulty plugins don't break loading
                 try {
                     require_once $pluginFile;
                 } catch (Throwable $t) {
-                    error_log("Error booting plugin [{$slug}]: " . $t->getMessage());
+                    $err_msg = "Error booting plugin [{$slug}]: " . $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
+                    $this->pluginErrors[$slug] = $err_msg;
+                    error_log($err_msg);
+                    if (function_exists('log_action')) {
+                        log_action('PLUGIN_BOOT_CRASH', ['slug' => $slug, 'error' => $err_msg]);
+                    }
                 }
             }
         }

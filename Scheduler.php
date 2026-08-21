@@ -283,6 +283,9 @@ class Scheduler
 
     public function getRegisteredTasks()
     {
+        if (empty($this->tasks) && class_exists('PluginManager')) {
+            PluginManager::getInstance()->doAction('init_scheduler', $this);
+        }
         return $this->tasks;
     }
 
@@ -291,6 +294,25 @@ class Scheduler
         try {
             $db = get_db_connection();
             return $db->query("SELECT * FROM scheduled_tasks ORDER BY task_key ASC")->fetchAll();
+        } catch (Exception $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Retrieve any background task failures grouped by plugin slug
+     * so administrative views can report isolated plugin errors.
+     */
+    public function getFailedTasksByPlugin()
+    {
+        try {
+            $db = get_db_connection();
+            $stmt = $db->query("SELECT task_key, plugin_slug, error_message, updated_at FROM scheduled_tasks WHERE status = 'failed'");
+            $failed = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $failed[$row['plugin_slug']][] = $row;
+            }
+            return $failed;
         } catch (Exception $e) {
             return [];
         }

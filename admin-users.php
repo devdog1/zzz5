@@ -16,6 +16,7 @@ $err = '';
 
 // Handle actions (Grant Role, Revoke Role, Grant Permission, Deny Permission, Create User)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    validate_csrf();
     $action = $_POST['action'] ?? '';
 
     if ($action === 'create_user') {
@@ -195,6 +196,7 @@ require_once __DIR__ . '/header.php';
                                                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                                 </div>
                                                 <form method="POST">
+                                                    <?php csrf_field(); ?>
                                                     <div class="modal-body text-start">
                                                         <input type="hidden" name="action" value="update_roles_permissions">
                                                         <input type="hidden" name="user_id" value="<?= $user['id'] ?>">
@@ -270,6 +272,7 @@ require_once __DIR__ . '/header.php';
             </div>
             <div class="card-body">
                 <form method="POST">
+                    <?php csrf_field(); ?>
                     <input type="hidden" name="action" value="create_user">
 
                     <div class="mb-3">

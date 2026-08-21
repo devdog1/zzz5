@@ -53,9 +53,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Fetch discovered plugins
+// Fetch discovered plugins, errors, and task statuses
 $plugins = $pluginManager->discoverPlugins();
 $activeCount = count($pluginManager->getActivePlugins());
+$failed_tasks_by_plugin = $scheduler->getFailedTasksByPlugin();
+$boot_errors = $pluginManager->getPluginErrors();
 
 require_once __DIR__ . '/header.php';
 ?>
@@ -66,6 +68,25 @@ require_once __DIR__ . '/header.php';
         <p class="text-muted">Discover new pluggable features, verify plugin compatibility with full diagnostic reports, toggle dynamic extensions, and monitor background crons.</p>
     </div>
 </div>
+
+<?php if (!empty($boot_errors) || !empty($failed_tasks_by_plugin)): ?>
+    <div class="alert alert-danger shadow-sm mb-4 text-start" role="alert">
+        <h5 class="alert-heading h6 fw-bold mb-2">
+            <i class="fa-solid fa-shield-halved me-2"></i>Plugin Safeguard Alert: Isolated Errors Detected
+        </h5>
+        <p class="mb-1 small">The platform isolated errors in the following plugin(s) to prevent impacting core system functions or other plugins:</p>
+        <ul class="mb-0 small ps-3">
+            <?php foreach ($boot_errors as $slug => $err_text): ?>
+                <li><strong>Module '<?= htmlspecialchars($slug) ?>' Boot Error:</strong> <?= htmlspecialchars($err_text) ?></li>
+            <?php endforeach; ?>
+            <?php foreach ($failed_tasks_by_plugin as $slug => $tasks): ?>
+                <?php foreach ($tasks as $ft): ?>
+                    <li><strong>Module '<?= htmlspecialchars($slug) ?>' Task Failure (<code><?= htmlspecialchars($ft['task_key']) ?></code>):</strong> <?= htmlspecialchars($ft['error_message'] ?: 'Execution crashed') ?></li>
+                <?php endforeach; ?>
+            <?php endforeach; ?>
+        </ul>
+    </div>
+<?php endif; ?>
 
 <?php if ($msg): ?>
     <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -176,7 +197,9 @@ require_once __DIR__ . '/header.php';
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($plugins as $slug => $meta): ?>
+                                <?php foreach ($plugins as $slug => $meta):
+                                    $has_error = isset($boot_errors[$slug]) || isset($failed_tasks_by_plugin[$slug]);
+                                ?>
                                     <tr>
                                         <td>
                                             <h5 class="h6 mb-0 fw-bold text-primary"><?= htmlspecialchars($meta['name']) ?></h5>
@@ -190,6 +213,9 @@ require_once __DIR__ . '/header.php';
                                         <td>
                                             <?php if ($meta['active']): ?>
                                                 <span class="badge bg-success"><i class="fa-solid fa-circle-check me-1"></i>Active</span>
+                                                <?php if ($has_error): ?>
+                                                    <span class="badge bg-danger ms-1" title="Safeguard Warning: Faulty behavior or task crash isolated for this plugin."><i class="fa-solid fa-triangle-exclamation me-1"></i>Error Isolated</span>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="badge bg-secondary">Inactive</span>
                                             <?php endif; ?>
@@ -237,6 +263,8 @@ require_once __DIR__ . '/header.php';
                 <i class="fa-solid fa-circle-info me-2"></i>Extension Info & Testing
             </div>
             <div class="card-body small">
+                <h6>Plugin Safeguards:</h6>
+                <p class="text-muted mb-3">The framework wraps each plugin's booting, routes, and background tasks in isolated try-catch shields, ensuring bad plugins never block other plugins or crash the system.</p>
                 <h6>Verbose Compatibility Checker:</h6>
                 <p class="text-muted mb-3">Click <strong>Check Compatibility</strong> on any plugin to run a dry-run diagnostic test verifying syntax, permission namespaces, role collisions, and database SQL scripts before activation.</p>
                 <h6>Dynamic RBAC Integration:</h6>
