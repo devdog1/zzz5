@@ -1,5 +1,5 @@
 <?php
-// admin-users.php - Admin User Directory and Permissions Management Interface
+// admin-users.php - Admin User Directory, Azure AD Group Role Mappings, and Permissions Management Interface
 require_once __DIR__ . '/functions.php';
 
 // Ensure user has admin rights
@@ -14,7 +14,7 @@ $db = get_db_connection();
 $msg = '';
 $err = '';
 
-// Handle actions (Grant Role, Revoke Role, Grant Permission, Deny Permission, Create User)
+// Handle actions (Grant Role, Revoke Role, Grant Permission, Deny Permission, Create User, Azure AD Group Mappings)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf();
     $action = $_POST['action'] ?? '';
@@ -92,6 +92,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $err = "Failed to update user privileges: " . $e->getMessage();
             }
         }
+    } elseif ($action === 'create_azure_group_role') {
+        $group_name = trim($_POST['azure_group_name'] ?? '');
+        $role_id = (int)($_POST['role_id'] ?? 0);
+
+        if (!empty($group_name) && $role_id > 0) {
+            try {
+                $stmt = $db->prepare("
+                    INSERT INTO azure_group_roles (azure_group_name, role_id)
+                    VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE role_id = VALUES(role_id)
+                ");
+                $stmt->execute([$group_name, $role_id]);
+                $msg = "Azure AD Group <strong>" . htmlspecialchars($group_name) . "</strong> mapped to local role successfully!";
+                log_action('ADMIN_CREATE_AZURE_GROUP_ROLE', ['group' => $group_name, 'role_id' => $role_id]);
+            } catch (Exception $e) {
+                $err = "Failed to map Azure AD Group: " . $e->getMessage();
+            }
+        } else {
+            $err = "Azure AD Group Name and Local Role selection are required.";
+        }
+    } elseif ($action === 'delete_azure_group_role') {
+        $group_name = trim($_POST['azure_group_name'] ?? '');
+        $role_id = (int)($_POST['role_id'] ?? 0);
+
+        if (!empty($group_name) && $role_id > 0) {
+            try {
+                $stmt = $db->prepare("DELETE FROM azure_group_roles WHERE azure_group_name = ? AND role_id = ?");
+                $stmt->execute([$group_name, $role_id]);
+                $msg = "Mapping for Azure AD Group <strong>" . htmlspecialchars($group_name) . "</strong> removed successfully!";
+                log_action('ADMIN_DELETE_AZURE_GROUP_ROLE', ['group' => $group_name, 'role_id' => $role_id]);
+            } catch (Exception $e) {
+                $err = "Failed to remove mapping: " . $e->getMessage();
+            }
+        }
     }
 }
 
@@ -99,32 +133,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $users = get_all_users();
 $roles = $db->query("SELECT * FROM roles ORDER BY id ASC")->fetchAll();
 $permissions = $db->query("SELECT * FROM permissions ORDER BY id ASC")->fetchAll();
+$azure_group_roles = $db->query("
+    SELECT agr.*, r.role_name, r.description AS role_description
+    FROM azure_group_roles agr
+    JOIN roles r ON r.id = agr.role_id
+    ORDER BY agr.azure_group_name ASC
+")->fetchAll();
 
 require_once __DIR__ . '/header.php';
 ?>
 
-<div class="row mb-4">
+<div class="row mb-4 text-start">
     <div class="col-md-8">
         <h1 class="h2"><i class="fa-solid fa-users-gear text-primary me-2"></i>User & Permissions Management</h1>
-        <p class="text-muted">Control global RBAC roles, assign specific direct permissions, deny permissions, and invite new users.</p>
+        <p class="text-muted">Control global RBAC roles, map Azure AD Groups to local roles, assign direct permissions, and manage accounts.</p>
     </div>
 </div>
 
 <?php if ($msg): ?>
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <div class="alert alert-success alert-dismissible fade show text-start" role="alert">
         <i class="fa-solid fa-circle-check me-1"></i> <?= $msg ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 <?php endif; ?>
 
 <?php if ($err): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <div class="alert alert-danger alert-dismissible fade show text-start" role="alert">
         <i class="fa-solid fa-triangle-exclamation me-1"></i> <?= $err ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 <?php endif; ?>
 
-<div class="row">
+<div class="row text-start mb-4">
     <!-- Users List & Permissions Configuration -->
     <div class="col-lg-8">
         <div class="card shadow-sm mb-4">
@@ -292,6 +332,97 @@ require_once __DIR__ . '/header.php';
 
                     <button type="submit" class="btn btn-sm btn-primary w-100">
                         <i class="fa-solid fa-circle-plus me-1"></i>Create Account
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Azure AD Group to Local Role Mappings Section -->
+<div class="row text-start">
+    <div class="col-lg-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <span><i class="fa-brands fa-microsoft me-2 text-info"></i>Azure AD Group to Local Role Mappings</span>
+                <span class="badge bg-info"><?= count($azure_group_roles) ?> Mappings</span>
+            </div>
+            <div class="card-body p-0">
+                <?php if (empty($azure_group_roles)): ?>
+                    <p class="text-muted p-4 mb-0">No Azure AD Group to Local Role mappings defined yet. Add a mapping on the right.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Azure AD Group Name / OID</th>
+                                    <th>Mapped Local Role</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($azure_group_roles as $agr): ?>
+                                    <tr>
+                                        <td>
+                                            <strong class="text-dark"><code><?= htmlspecialchars($agr['azure_group_name']) ?></code></strong>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-success p-2">
+                                                <i class="fa-solid fa-tag me-1"></i>
+                                                <?= ucfirst(htmlspecialchars($agr['role_name'])) ?>
+                                            </span>
+                                        </td>
+                                        <td class="text-end">
+                                            <form method="POST" class="d-inline" onsubmit="return confirm('Remove this Azure AD Group mapping?');">
+                                                <?php csrf_field(); ?>
+                                                <input type="hidden" name="action" value="delete_azure_group_role">
+                                                <input type="hidden" name="azure_group_name" value="<?= htmlspecialchars($agr['azure_group_name']) ?>">
+                                                <input type="hidden" name="role_id" value="<?= $agr['role_id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                    <i class="fa-solid fa-trash me-1"></i>Remove
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form to Add New Azure AD Group Role Mapping -->
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-info">
+            <div class="card-header bg-info text-dark">
+                <i class="fa-solid fa-link me-2"></i>Map Azure AD Group to Role
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <?php csrf_field(); ?>
+                    <input type="hidden" name="action" value="create_azure_group_role">
+
+                    <div class="mb-3">
+                        <label for="azure_group_name" class="form-label small fw-bold">Azure AD Group Name / Object ID</label>
+                        <input type="text" name="azure_group_name" id="azure_group_name" class="form-control form-control-sm" placeholder="e.g. Portal-Administrators" required>
+                        <div class="form-text">Exact group name or Object ID returned in Azure AD SSO token groups claim.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="role_id" class="form-label small fw-bold">Target Local Role</label>
+                        <select name="role_id" id="role_id" class="form-select form-select-sm" required>
+                            <option value="">-- Select Local Role --</option>
+                            <?php foreach ($roles as $r): ?>
+                                <option value="<?= $r['id'] ?>"><?= ucfirst(htmlspecialchars($r['role_name'])) ?> - <?= htmlspecialchars($r['description']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text">Users belonging to this Azure AD group will automatically be assigned this local role upon SSO login.</div>
+                    </div>
+
+                    <button type="submit" class="btn btn-sm btn-info w-100 text-dark fw-bold">
+                        <i class="fa-solid fa-link me-1"></i>Save Group Mapping
                     </button>
                 </form>
             </div>
