@@ -520,6 +520,45 @@ function oncall_get_current_on_call($department_id, $timestamp) {
     return null;
 }
 
+function oncall_get_background_assigned_user($department_id, $timestamp) {
+    $pdb = oncall_get_pdb();
+    $tb_slots = $pdb->getTableName('schedule_slots');
+    $tb_ovs = $pdb->getTableName('overrides');
+
+    $start_str = date('Y-m-d H:i:s', $timestamp - 10);
+    $end_str = date('Y-m-d H:i:s', $timestamp + 10);
+
+    $sql_slots = "
+        SELECT s.*, u.username, COALESCE(NULLIF(u.display_name, ''), u.username) AS display_name
+        FROM {$tb_slots} s
+        JOIN users u ON s.user_id = u.id
+        WHERE s.department_id = ?
+          AND s.start_time < ?
+          AND s.end_time > ?
+        ORDER BY s.start_time ASC
+    ";
+    $base_slots = $pdb->query($sql_slots, [$department_id, $end_str, $start_str])->fetchAll();
+
+    $sql_ovs = "
+        SELECT o.*, u.username, COALESCE(NULLIF(u.display_name, ''), u.username) AS display_name
+        FROM {$tb_ovs} o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.department_id = ?
+          AND o.start_time < ?
+          AND o.end_time > ?
+        ORDER BY o.start_time ASC
+    ";
+    $overrides = $pdb->query($sql_ovs, [$department_id, $end_str, $start_str])->fetchAll();
+
+    $raw_segments = oncall_calculate_final_schedule($base_slots, $overrides);
+    foreach ($raw_segments as $seg) {
+        if ($timestamp >= $seg['start'] && $timestamp <= $seg['end']) {
+            return $seg;
+        }
+    }
+    return null;
+}
+
 function oncall_get_upcoming_user_shifts($user_id, $limit = 5) {
     $pdb = oncall_get_pdb();
     $tb_slots = $pdb->getTableName('schedule_slots');

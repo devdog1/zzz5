@@ -398,65 +398,162 @@ add_action('index_dashboard_widgets', function($user_context) {
         return;
     }
 
-    $current_user_id = $user_context['user_id'] ?? null;
     $departments = oncall_get_all_departments();
-    $upcoming_shifts = $current_user_id ? oncall_get_upcoming_user_shifts($current_user_id, 3) : [];
-    ?>
-    <div class="col-md-6 mb-4">
-        <div class="card h-100 shadow-sm border-0 border-start border-4 border-primary">
-            <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
-                <h5 class="card-title mb-0 text-primary">
-                    <i class="bi bi-telephone-inbound me-2"></i>Current On-Call Contacts
-                </h5>
-                <a href="<?php echo url_for('oncall_calendar'); ?>" class="btn btn-sm btn-outline-primary">View Full Calendar</a>
-            </div>
-            <div class="card-body">
-                <div class="list-group list-group-flush mb-3">
-                    <?php if (empty($departments)): ?>
-                        <div class="list-group-item text-muted">No departments configured.</div>
-                    <?php else: ?>
-                        <?php foreach ($departments as $dept): ?>
-                            <?php
-                            $now_oncall = oncall_get_current_on_call($dept['id'], time());
-                            ?>
-                            <div class="list-group-item d-flex justify-content-between align-items-center px-0">
-                                <div>
-                                    <strong><?php echo htmlspecialchars($dept['name']); ?></strong>
-                                    <?php if (!empty($dept['noc_mode'])): ?>
-                                        <span class="badge bg-warning text-dark ms-1">NOC Active</span>
-                                    <?php endif; ?>
-                                </div>
-                                <div>
-                                    <?php if ($now_oncall): ?>
-                                        <span class="badge bg-success p-2">
-                                            <i class="bi bi-person-check-fill me-1"></i>
-                                            <?php echo htmlspecialchars($now_oncall['display_name']); ?>
-                                        </span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary p-2">Unassigned</span>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </div>
+    if (empty($departments)) {
+        return;
+    }
 
-                <?php if ($current_user_id && !empty($upcoming_shifts)): ?>
-                    <div class="border-top pt-3">
-                        <h6 class="fw-bold mb-2 text-dark"><i class="bi bi-calendar-check me-1"></i>Your Next On-Call Shifts:</h6>
-                        <ul class="list-unstyled mb-0 small">
-                            <?php foreach ($upcoming_shifts as $shift): ?>
-                                <li class="mb-1 text-muted">
-                                    <i class="bi bi-clock me-1 text-primary"></i>
-                                    <strong><?php echo htmlspecialchars($shift['department_name']); ?>:</strong>
-                                    <?php echo date('M d, H:i', strtotime($shift['start_time'])); ?> &rarr; <?php echo date('M d, H:i', strtotime($shift['end_time'])); ?>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
+    $now = time();
+    $now_str = date('Y-m-d H:i:s', $now);
+    $week_ahead_str = date('Y-m-d H:i:s', strtotime('+7 days', $now));
+
+    foreach ($departments as $dept) {
+        $now_oncall = oncall_get_current_on_call($dept['id'], $now);
+            $background_user = null;
+            if ($now_oncall && strpos($now_oncall['description'], 'NOC') !== false) {
+                $background_user = oncall_get_background_assigned_user($dept['id'], $now);
+            }
+
+        $all_segments = oncall_get_final_schedule_for_department($dept['id'], $now_str, $week_ahead_str);
+
+        // Filter upcoming segments
+        $upcoming_segments = [];
+        foreach ($all_segments as $seg) {
+            if ($now_oncall && $seg['start'] == $now_oncall['start'] && $seg['end'] == $now_oncall['end']) {
+                continue; // Skip active current segment
+            }
+            if ($seg['start'] >= $now) {
+                $upcoming_segments[] = $seg;
+            }
+            if (count($upcoming_segments) >= 3) {
+                break;
+            }
+        }
+
+        // Determine badge status
+        $status_badge_class = 'bg-primary text-white';
+        $status_badge_label = 'Active Rotation';
+        $status_icon = 'fa-solid fa-circle-check';
+
+        if ($now_oncall) {
+            if (!empty($now_oncall['is_override'])) {
+                $status_badge_class = 'bg-warning text-dark';
+                $status_badge_label = 'Manual Override';
+                $status_icon = 'fa-solid fa-circle-exclamation';
+            }
+        } else {
+            $status_badge_class = 'bg-secondary text-white';
+            $status_badge_label = 'Unassigned';
+            $status_icon = 'fa-solid fa-circle-minus';
+        }
+        ?>
+        <div class="col-12 mb-4 text-start">
+            <div class="card shadow-sm border-0 border-start border-4 border-warning">
+                <div class="card-body p-4">
+                    <!-- Top Header Row -->
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <h3 class="fw-bold text-primary mb-0"><?php echo htmlspecialchars($dept['name']); ?></h3>
+                            <small class="text-muted">Active Coverage Status</small>
+                        </div>
+                        <div>
+                            <span class="badge <?php echo $status_badge_class; ?> fs-7 px-3 py-2 rounded-pill fw-bold">
+                                <i class="<?php echo $status_icon; ?> me-1"></i>
+                                <?php echo htmlspecialchars($status_badge_label); ?>
+                            </span>
+                        </div>
                     </div>
-                <?php endif; ?>
+
+                    <hr class="my-3 text-secondary opacity-25">
+
+                    <div class="row g-4">
+                        <!-- Left Column: ON-CALL PERSON -->
+                        <div class="col-lg-6 border-end-lg">
+                            <small class="text-uppercase fw-bold text-secondary d-block mb-3" style="letter-spacing: 0.5px; font-size: 0.75rem;">ON-CALL PERSON</small>
+                            <?php if ($now_oncall): ?>
+                                <div class="d-flex align-items-center mb-3">
+                                    <div class="bg-light rounded-circle d-flex align-items-center justify-content-center me-3 text-secondary" style="width: 52px; height: 52px;">
+                                        <i class="fa-solid fa-user fs-3"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="fw-bold mb-0 text-dark"><?php echo htmlspecialchars($now_oncall['display_name']); ?></h4>
+                                        <small class="text-muted">(@<?php echo htmlspecialchars($now_oncall['username']); ?>)</small>
+                                    </div>
+                                </div>
+
+                                <div class="small text-secondary">
+                                    <div class="mb-1">
+                                        <i class="fa-solid fa-envelope me-2"></i>
+                                        <span><?php echo htmlspecialchars($now_oncall['username']); ?></span>
+                                    </div>
+                                    <div class="mb-1">
+                                        <i class="fa-solid fa-calendar-days me-2"></i>
+                                        <span>Shift: <?php echo date('M d, H:i', $now_oncall['start']); ?> &rarr; <?php echo date('M d, H:i', $now_oncall['end']); ?></span>
+                                    </div>
+                                    <div class="text-warning fw-bold">
+                                        <i class="fa-solid fa-tag me-2"></i>
+                                        <span>Reason: <?php echo htmlspecialchars($now_oncall['description'] ?: 'Base Rotation'); ?></span>
+                                    </div>
+                                    <?php if ($background_user): ?>
+                                        <div class="mt-2 pt-2 border-top text-dark small">
+                                            <i class="fa-solid fa-user-clock text-primary me-1"></i>
+                                            <strong>Background Scheduled User:</strong>
+                                            <span class="fw-bold"><?php echo htmlspecialchars($background_user['display_name']); ?></span>
+                                            <span class="text-muted">(<?php echo htmlspecialchars($background_user['username']); ?>)</span>
+                                            <?php if (!empty($background_user['is_override'])): ?>
+                                                <span class="badge bg-warning text-dark ms-1">Override</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-light text-secondary border ms-1">Rotation</span>
+                                            <?php endif; ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            <?php else: ?>
+                                <div class="text-muted py-3">
+                                    <i class="fa-solid fa-triangle-exclamation text-warning me-2 fs-4"></i>
+                                    <span>No active on-call user currently assigned for this department.</span>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- Right Column: UPCOMING SHIFTS -->
+                        <div class="col-lg-6">
+                            <small class="text-uppercase fw-bold text-secondary d-block mb-3" style="letter-spacing: 0.5px; font-size: 0.75rem;">UPCOMING SHIFTS</small>
+                            <?php if (empty($upcoming_segments)): ?>
+                                <p class="text-muted small py-2 mb-0">No upcoming shifts scheduled for the next 7 days.</p>
+                            <?php else: ?>
+                                <div class="table-responsive">
+                                    <table class="table table-borderless table-sm align-middle mb-0 small">
+                                        <thead>
+                                            <tr class="border-bottom text-dark fw-bold">
+                                                <th>User</th>
+                                                <th>Starts</th>
+                                                <th>Type</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($upcoming_segments as $useg): ?>
+                                                <tr>
+                                                    <td class="fw-bold text-dark"><?php echo htmlspecialchars($useg['display_name']); ?></td>
+                                                    <td class="text-secondary"><?php echo date('M d, H:i', $useg['start']); ?></td>
+                                                    <td>
+                                                        <?php if ($useg['is_override']): ?>
+                                                            <span class="badge bg-warning text-dark px-2 py-1">Override</span>
+                                                        <?php else: ?>
+                                                            <span class="badge bg-light text-secondary border px-2 py-1">Rotation</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
-    <?php
+        <?php
+    }
 });
