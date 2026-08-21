@@ -185,6 +185,11 @@ $site_name = get_setting('site_name', 'Framework Portal');
                                     </a>
                                 </li>
                                 <li>
+                                    <a class="dropdown-item <?= ($current_page === 'admin-azure-groups.php') ? 'active' : '' ?>" href="admin-azure-groups.php">
+                                        <i class="fa-brands fa-microsoft me-2 text-info"></i> Azure AD Groups
+                                    </a>
+                                </li>
+                                <li>
                                     <a class="dropdown-item <?= ($current_page === 'admin-logs.php') ? 'active' : '' ?>" href="admin-logs.php">
                                         <i class="fa-solid fa-receipt me-2 text-primary"></i> Audit Trail Logs
                                     </a>

@@ -345,7 +345,12 @@ require_once __DIR__ . '/header.php';
         <div class="card shadow-sm mb-4">
             <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
                 <span><i class="fa-brands fa-microsoft me-2 text-info"></i>Azure AD Group to Local Role Mappings</span>
-                <span class="badge bg-info"><?= count($azure_group_roles) ?> Mappings</span>
+                <div>
+                    <a href="admin-azure-groups.php" class="btn btn-sm btn-outline-info me-2">
+                        <i class="fa-solid fa-folder-tree me-1"></i>View Azure AD Directory
+                    </a>
+                    <span class="badge bg-info"><?= count($azure_group_roles) ?> Mappings</span>
+                </div>
             </div>
             <div class="card-body p-0">
                 <?php if (empty($azure_group_roles)): ?>

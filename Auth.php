@@ -292,6 +292,11 @@ class Auth
         return isset($_SESSION['roles'][$role]);
     }
 
+    public function getSSO(): AzureADSSO
+    {
+        return $this->sso;
+    }
+
     public function user(): ?array
     {
         return $_SESSION['user'] ?? null;
