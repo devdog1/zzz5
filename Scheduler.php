@@ -36,8 +36,9 @@ class Scheduler
         try {
             $db = get_db_connection();
             $stmt = $db->prepare("
-                INSERT IGNORE INTO scheduled_tasks (task_key, plugin_slug, interval_seconds, is_enabled)
+                INSERT INTO scheduled_tasks (task_key, plugin_slug, interval_seconds, is_enabled)
                 VALUES (?, ?, ?, 1)
+                ON DUPLICATE KEY UPDATE plugin_slug = VALUES(plugin_slug)
             ");
             $stmt->execute([$scoped_key, $plugin_slug, (int)$interval_seconds]);
         } catch (Exception $e) {
@@ -191,13 +192,25 @@ class Scheduler
      * Executes a single task's callback directly within the current process context.
      * This is invoked by asynchronous spawned background subprocesses.
      */
-    public function executeSingleTask($scoped_key)
+    public function executeSingleTask($target_key)
     {
-        if (!isset($this->tasks[$scoped_key])) {
-            throw new Exception("Task [{$scoped_key}] is not registered.");
+        $task = null;
+        if (isset($this->tasks[$target_key])) {
+            $task = $this->tasks[$target_key];
+        } else {
+            foreach ($this->tasks as $s_key => $t_info) {
+                if ($t_info['key'] === $target_key || $t_info['scoped_key'] === $target_key) {
+                    $task = $t_info;
+                    break;
+                }
+            }
         }
 
-        $task = $this->tasks[$scoped_key];
+        if (!$task) {
+            throw new Exception("Task [{$target_key}] is not registered or its plugin is inactive.");
+        }
+
+        $scoped_key = $task['scoped_key'];
         $db = get_db_connection();
 
         try {

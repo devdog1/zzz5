@@ -67,12 +67,44 @@ $site_name = get_setting('site_name', 'Framework Portal');
                     </a>
                 </li>
 
-                <!-- Filter Hook for plugins to add navigation links dynamically (supporting nested sub-menus) -->
+                <!-- Filter Hook for plugins to add navigation links dynamically with admin reorder/visibility overrides -->
                 <?php
-                $nav_links = [];
-                $nav_links = $pluginManager->applyFilters('theme_nav_links', $nav_links);
+                $raw_nav_links = [];
+                $raw_nav_links = $pluginManager->applyFilters('theme_nav_links', $raw_nav_links);
 
-                foreach ($nav_links as $link) {
+                $nav_config_json = get_setting('nav_menu_config', '{}');
+                $nav_config = json_decode($nav_config_json, true) ?: [];
+
+                $processed_nav_links = [];
+                $default_order = 100;
+
+                foreach ($raw_nav_links as $link) {
+                    $item_id = !empty($link['route']) ? $link['route'] : preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($link['label']));
+                    $cfg = $nav_config[$item_id] ?? [];
+
+                    // 1. Visibility Check (default: 1 = visible)
+                    if (isset($cfg['visible']) && (int)$cfg['visible'] === 0) {
+                        continue;
+                    }
+
+                    // 2. Custom Label Override
+                    if (!empty($cfg['label'])) {
+                        $link['label'] = $cfg['label'];
+                    }
+
+                    // 3. Custom Order Override
+                    $link['_order'] = isset($cfg['order']) ? (int)$cfg['order'] : $default_order;
+                    $default_order += 10;
+
+                    $processed_nav_links[] = $link;
+                }
+
+                // Sort navigation items by order ASC
+                usort($processed_nav_links, function($a, $b) {
+                    return ($a['_order'] ?? 100) <=> ($b['_order'] ?? 100);
+                });
+
+                foreach ($processed_nav_links as $link) {
                     // Check top-level permission constraint
                     if (isset($link['permission']) && !has_permission($link['permission'])) {
                         continue;
@@ -142,6 +174,11 @@ $site_name = get_setting('site_name', 'Framework Portal');
                                 </li>
                             <?php endif; ?>
                             <?php if (has_permission('manage_settings')): ?>
+                                <li>
+                                    <a class="dropdown-item <?= ($current_page === 'admin-nav.php') ? 'active' : '' ?>" href="admin-nav.php">
+                                        <i class="fa-solid fa-bars-staggered me-2 text-info"></i> Navigation Manager
+                                    </a>
+                                </li>
                                 <li>
                                     <a class="dropdown-item <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
                                         <i class="fa-solid fa-users-gear me-2 text-success"></i> Users & RBAC
