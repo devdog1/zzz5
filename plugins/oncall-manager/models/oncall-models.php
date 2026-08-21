@@ -796,11 +796,21 @@ function oncall_sync_zabbix_via_api() {
     }
 
     $synced_count = 0;
+    $user_domain = ltrim(oncall_get_setting('zabbix_sync_domain', 'example.com'), '@');
+
     foreach ($zabbix_users as $zu) {
-        $username = $zu['username'];
+        $z_username = $zu['username'];
         $z_id = $zu['userid'];
-        $email = $username . '@example.com';
-        $display_name = $zu['name'] . ' ' . $zu['surname'];
+
+        if (filter_var($z_username, FILTER_VALIDATE_EMAIL)) {
+            $email = $z_username;
+        } else {
+            $email = $z_username . '@' . $user_domain;
+        }
+
+        // Require username to be the full email address in the users table
+        $username = $email;
+        $display_name = trim(($zu['name'] ?? '') . ' ' . ($zu['surname'] ?? '')) ?: $z_username;
 
         $phone = '';
         if (!empty($zu['medias']) && is_array($zu['medias'])) {
@@ -812,14 +822,14 @@ function oncall_sync_zabbix_via_api() {
             }
         }
 
-        $stmt = $db->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
-        $stmt->execute([$username, $email]);
+        $stmt = $db->prepare("SELECT id FROM users WHERE username = ? OR email = ? OR username = ?");
+        $stmt->execute([$username, $email, $z_username]);
         $local = $stmt->fetch();
 
         if ($local) {
             $local_user_id = $local['id'];
-            $stmt_u = $db->prepare("UPDATE users SET display_name = ?, phone = ? WHERE id = ?");
-            $stmt_u->execute([$display_name, $phone, $local_user_id]);
+            $stmt_u = $db->prepare("UPDATE users SET username = ?, email = ?, display_name = ?, phone = ? WHERE id = ?");
+            $stmt_u->execute([$username, $email, $display_name, $phone, $local_user_id]);
         } else {
             $stmt_i = $db->prepare("INSERT INTO users (username, email, display_name, phone, auto_provisioned) VALUES (?, ?, ?, ?, 1)");
             $stmt_i->execute([$username, $email, $display_name, $phone]);

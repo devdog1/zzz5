@@ -7,6 +7,7 @@ function oncall_render_settings_page() {
 
     $zabbix_url = oncall_get_setting('zabbix_api_url', 'http://127.0.0.1/zabbix/api_jsonrpc.php');
     $zabbix_token = oncall_get_setting('zabbix_api_token', '');
+    $zabbix_domain = oncall_get_setting('zabbix_sync_domain', 'example.com');
 
     $noc_stmt = $pdb->query("SELECT * FROM {$tb_noc} ORDER BY day_of_week ASC");
     $noc_hours = [];
@@ -30,7 +31,7 @@ function oncall_render_settings_page() {
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1 class="h3 mb-0">On-Call Manager Settings</h1>
-            <p class="text-muted mb-0">Configure Zabbix API integration credentials and default NOC Business Hours</p>
+            <p class="text-muted mb-0">Configure Zabbix API integration credentials, user email domain, and default NOC Business Hours</p>
         </div>
     </div>
 
@@ -67,6 +68,12 @@ function oncall_render_settings_page() {
                         <div class="mb-3">
                             <label for="zabbix_api_token" class="form-label fw-bold">Zabbix API Auth Token</label>
                             <input type="password" name="zabbix_api_token" id="zabbix_api_token" class="form-control" value="<?php echo htmlspecialchars($zabbix_token); ?>" placeholder="Enter Zabbix API bearer token">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="zabbix_sync_domain" class="form-label fw-bold">Zabbix User Sync Email Domain</label>
+                            <input type="text" name="zabbix_sync_domain" id="zabbix_sync_domain" class="form-control" value="<?php echo htmlspecialchars($zabbix_domain); ?>" placeholder="e.g. example.com">
+                            <div class="form-text">Domain appended to Zabbix usernames during sync to form their full email address and local username.</div>
                         </div>
 
                         <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save Zabbix Settings</button>

@@ -321,9 +321,11 @@ add_action('register_routes', function() {
             if ($action === 'save_zabbix_settings') {
                 $url = $_POST['zabbix_api_url'] ?? '';
                 $token = $_POST['zabbix_api_token'] ?? '';
+                $domain = $_POST['zabbix_sync_domain'] ?? '';
 
                 oncall_set_setting('zabbix_api_url', $url);
                 oncall_set_setting('zabbix_api_token', $token);
+                oncall_set_setting('zabbix_sync_domain', $domain);
 
                 redirect(url_for('oncall_settings') . '&msg=' . urlencode('Zabbix API integration settings saved.'));
             } elseif ($action === 'save_noc_hours') {
