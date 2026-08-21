@@ -1,5 +1,5 @@
 <?php
-// admin-diagnostics.php - Core System Integrity and Diagnostics Panel
+// admin-diagnostics.php - Core System Integrity, Diagnostics, and Portal Branding Panel
 require_once __DIR__ . '/functions.php';
 
 // Enforce admin permission
@@ -11,9 +11,28 @@ if (!has_permission('manage_settings')) {
 }
 
 $db = get_db_connection();
+$msg = '';
+$err = '';
 $db_status = "Online";
 $db_error = "";
 $tables_found = [];
+
+// Handle Site Settings update
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    validate_csrf();
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'save_site_settings') {
+        $site_name = trim($_POST['site_name'] ?? '');
+        if (!empty($site_name)) {
+            set_setting('site_name', $site_name);
+            $msg = "Site Name updated to '<strong>" . htmlspecialchars($site_name) . "</strong>' successfully!";
+            log_action('ADMIN_SITE_NAME_UPDATE', ['site_name' => $site_name]);
+        } else {
+            $err = "Site Name cannot be empty.";
+        }
+    }
+}
 
 try {
     $stmt = $db->query("SHOW TABLES");
@@ -26,14 +45,48 @@ try {
 require_once __DIR__ . '/header.php';
 ?>
 
-<div class="row mb-4">
+<div class="row mb-4 text-start">
     <div class="col-md-12">
-        <h1 class="h2"><i class="fa-solid fa-stethoscope text-danger me-2"></i>System Diagnostics & Integrity</h1>
-        <p class="text-muted">Validate database schemas, inspect active plugin table prefixes, check environment configurations, and monitor security controls.</p>
+        <h1 class="h2"><i class="fa-solid fa-stethoscope text-danger me-2"></i>System Diagnostics & Settings</h1>
+        <p class="text-muted">Manage portal site branding, validate database schemas, inspect active plugin table prefixes, and monitor environment parameters.</p>
     </div>
 </div>
 
-<div class="row">
+<?php if ($msg): ?>
+    <div class="alert alert-success alert-dismissible fade show text-start"><i class="fa-solid fa-circle-check me-1"></i> <?= $msg ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+<?php endif; ?>
+<?php if ($err): ?>
+    <div class="alert alert-danger alert-dismissible fade show text-start"><i class="fa-solid fa-circle-exclamation me-1"></i> <?= $err ?><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+<?php endif; ?>
+
+<div class="row text-start mb-4">
+    <!-- Portal Branding Form -->
+    <div class="col-lg-12">
+        <div class="card shadow-sm border-primary">
+            <div class="card-header bg-primary text-white">
+                <i class="fa-solid fa-pen-to-square me-2"></i>Portal Branding & Site Settings
+            </div>
+            <div class="card-body">
+                <form method="POST" class="row align-items-end g-3">
+                    <?php csrf_field(); ?>
+                    <input type="hidden" name="action" value="save_site_settings">
+                    <div class="col-md-8">
+                        <label for="site_name" class="form-label fw-bold">Portal Site Name (DB Parameter: <code>site_name</code>)</label>
+                        <input type="text" name="site_name" id="site_name" class="form-control" value="<?= htmlspecialchars(get_setting('site_name', 'Framework Portal')) ?>" required>
+                        <div class="form-text">This name appears on the browser title bar, login screen, and top navigation brand logo.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fa-solid fa-floppy-disk me-1"></i>Save Site Name
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row text-start">
     <!-- Server Environment & Database Status -->
     <div class="col-lg-6">
         <div class="card shadow-sm mb-4">

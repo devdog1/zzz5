@@ -61,57 +61,59 @@ $currentUserContext = [
     ?>
 </div>
 
-<div class="row text-start">
-    <!-- Active Plugins list panel -->
-    <div class="col-lg-8">
-        <div class="card shadow-sm mb-4">
-            <div class="card-header bg-dark text-white"><i class="fa-solid fa-puzzle-piece me-2"></i>Active Feature Modules</div>
-            <div class="card-body">
-                <p class="small text-muted mb-3">All portal features are dynamically served by independent feature packages. Active modules are monitored below:</p>
-                <?php if (empty($activePluginsList)): ?>
-                    <div class="alert alert-light border small text-center mb-0">No dynamic feature modules are currently enabled on your portal.</div>
-                <?php else: ?>
-                    <div class="row">
-                        <?php foreach ($activePluginsList as $active_slug): ?>
-                            <div class="col-md-6 mb-3">
-                                <div class="p-3 bg-light rounded border border-start border-3 border-success d-flex align-items-center justify-content-between">
-                                    <div>
-                                        <h6 class="fw-bold mb-0 text-dark"><?= htmlspecialchars(ucwords(str_replace('-', ' ', $active_slug))) ?></h6>
-                                        <small class="text-muted font-monospace">slug: <?= htmlspecialchars($active_slug) ?></small>
+<?php if (has_permission('manage_plugins')): ?>
+    <div class="row text-start">
+        <!-- Active Plugins list panel -->
+        <div class="col-lg-8">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-dark text-white"><i class="fa-solid fa-puzzle-piece me-2"></i>Active Feature Modules</div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">All portal features are dynamically served by independent feature packages. Active modules are monitored below:</p>
+                    <?php if (empty($activePluginsList)): ?>
+                        <div class="alert alert-light border small text-center mb-0">No dynamic feature modules are currently enabled on your portal.</div>
+                    <?php else: ?>
+                        <div class="row">
+                            <?php foreach ($activePluginsList as $active_slug): ?>
+                                <div class="col-md-6 mb-3">
+                                    <div class="p-3 bg-light rounded border border-start border-3 border-success d-flex align-items-center justify-content-between">
+                                        <div>
+                                            <h6 class="fw-bold mb-0 text-dark"><?= htmlspecialchars(ucwords(str_replace('-', ' ', $active_slug))) ?></h6>
+                                            <small class="text-muted font-monospace">slug: <?= htmlspecialchars($active_slug) ?></small>
+                                        </div>
+                                        <span class="badge bg-success small"><i class="fa-solid fa-circle-check me-1"></i>Running</span>
                                     </div>
-                                    <span class="badge bg-success small"><i class="fa-solid fa-circle-check me-1"></i>Running</span>
                                 </div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Right Column: Quick Stats -->
-    <div class="col-lg-4">
-        <!-- Quick Stats -->
-        <div class="card mb-4 shadow-sm border-info">
-            <div class="card-header bg-info text-dark">
-                <i class="fa-solid fa-chart-pie me-2"></i>System Quick Stats
-            </div>
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span>Registered Users</span>
-                    <span class="badge bg-secondary"><?= count(get_all_users()) ?></span>
+        <!-- Right Column: Quick Stats -->
+        <div class="col-lg-4">
+            <!-- Quick Stats -->
+            <div class="card mb-4 shadow-sm border-info">
+                <div class="card-header bg-info text-dark">
+                    <i class="fa-solid fa-chart-pie me-2"></i>System Quick Stats
                 </div>
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span>Active Modules</span>
-                    <span class="badge bg-success"><?= $activeCount ?></span>
-                </div>
-                <div class="d-flex justify-content-between align-items-center">
-                    <span>Database Engine</span>
-                    <span class="badge bg-dark">MySQL/PDO</span>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span>Registered Users</span>
+                        <span class="badge bg-secondary"><?= count(get_all_users()) ?></span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span>Active Modules</span>
+                        <span class="badge bg-success"><?= $activeCount ?></span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span>Database Engine</span>
+                        <span class="badge bg-dark">MySQL/PDO</span>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
+<?php endif; ?>
 
 <?php require_once __DIR__ . '/footer.php'; ?>

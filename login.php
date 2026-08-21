@@ -8,6 +8,7 @@ if (isset($_SESSION['user_id'])) {
 }
 
 $error = '';
+$site_name = get_setting('site_name', 'Framework Portal');
 
 // Handle real Azure AD login redirect
 if (isset($_POST['azure_login'])) {
@@ -22,7 +23,7 @@ if (isset($_POST['azure_login'])) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Login - Base Framework</title>
+    <title>Login - <?= htmlspecialchars($site_name) ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
     <style>
@@ -49,7 +50,7 @@ if (isset($_POST['azure_login'])) {
         <div class="bg-dark text-info rounded-circle d-inline-flex p-3 mb-3">
             <i class="fa-solid fa-cubes fa-2x"></i>
         </div>
-        <h3 class="fw-bold text-dark">Portal Framework</h3>
+        <h3 class="fw-bold text-dark"><?= htmlspecialchars($site_name) ?></h3>
         <p class="text-muted small">Sign in to access modules & features</p>
     </div>
 
