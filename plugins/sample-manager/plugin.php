@@ -98,7 +98,10 @@ PluginManager::getInstance()->addAction('activate_plugin_sample-manager', functi
     log_action('SAMPLE_PLUGIN_ACTIVATE_DB_SUCCESS', []);
 });
 
-PluginManager::getInstance()->addAction('deactivate_plugin_sample-manager', function() {
+PluginManager::getInstance()->addAction('deactivate_plugin_sample-manager', function($purge_tables = false) {
+    if (!$purge_tables) {
+        return;
+    }
     $pdb = new PluginDatabase('sample-manager');
     $pdb->dropTable('logs');
     log_action('SAMPLE_PLUGIN_DEACTIVATE_DB_SUCCESS', []);

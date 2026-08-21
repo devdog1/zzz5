@@ -47,7 +47,10 @@ function oncall_plugin_install_tables() {
 }
 
 add_action('plugin_deactivate_oncall-manager', 'oncall_plugin_uninstall_tables');
-function oncall_plugin_uninstall_tables() {
+function oncall_plugin_uninstall_tables($purge_tables = false) {
+    if (!$purge_tables) {
+        return; // Retain plugin database tables unless explicitly requested to purge!
+    }
     $uninstall_sql_file = __DIR__ . '/sql/uninstall.sql';
     if (file_exists($uninstall_sql_file)) {
         $pdb = oncall_get_pdb();

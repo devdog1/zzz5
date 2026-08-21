@@ -627,7 +627,7 @@ class PluginManager
         }
     }
 
-    public function deactivatePlugin($slug)
+    public function deactivatePlugin($slug, $purge_tables = false)
     {
         if (!$this->isPluginActive($slug)) return true;
 
@@ -693,8 +693,8 @@ class PluginManager
                 }
             }
 
-            // Trigger deactivation action hook safely
-            $this->doAction("plugin_deactivate_{$slug}");
+            // Trigger deactivation action hook safely, passing $purge_tables flag
+            $this->doAction("plugin_deactivate_{$slug}", $purge_tables);
 
             if (($key = array_search($slug, $this->activePlugins)) !== false) {
                 unset($this->activePlugins[$key]);

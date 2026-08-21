@@ -32,11 +32,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'deactivate') {
         $slug = $_POST['plugin_slug'] ?? '';
-        if ($pluginManager->deactivatePlugin($slug)) {
-            $msg = "Module <strong>" . htmlspecialchars($slug) . "</strong> has been successfully deactivated!";
-            log_action('DEACTIVATE_PLUGIN', ['slug' => $slug]);
+        $confirm_name = trim($_POST['confirm_name'] ?? '');
+        $purge_tables = !empty($_POST['purge_tables']) ? true : false;
+
+        $discovered = $pluginManager->discoverPlugins();
+        $expected_name = $discovered[$slug]['name'] ?? $slug;
+
+        if (strcasecmp($confirm_name, $expected_name) !== 0 && strcasecmp($confirm_name, $slug) !== 0) {
+            $err = "Deactivation Canceled: Submitted confirmation name '<strong>" . htmlspecialchars($confirm_name) . "</strong>' does not match plugin name '<strong>" . htmlspecialchars($expected_name) . "</strong>'.";
         } else {
-            $err = "Failed to deactivate module <strong>" . htmlspecialchars($slug) . "</strong>.";
+            if ($pluginManager->deactivatePlugin($slug, $purge_tables)) {
+                $msg = "Module <strong>" . htmlspecialchars($slug) . "</strong> has been deactivated! " . ($purge_tables ? "(Database tables purged)" : "(Database tables retained)");
+                log_action('DEACTIVATE_PLUGIN', ['slug' => $slug, 'purge_tables' => $purge_tables]);
+            } else {
+                $err = "Failed to deactivate module <strong>" . htmlspecialchars($slug) . "</strong>.";
+            }
         }
     } elseif ($action === 'inspect') {
         $slug = $_POST['plugin_slug'] ?? '';
@@ -230,21 +240,69 @@ require_once __DIR__ . '/header.php';
                                                 </button>
                                             </form>
 
-                                            <form method="POST" class="m-0 d-inline-block">
-                                                <?php csrf_field(); ?>
-                                                <input type="hidden" name="plugin_slug" value="<?= htmlspecialchars($slug) ?>">
-                                                <?php if ($meta['active']): ?>
-                                                    <input type="hidden" name="action" value="deactivate">
-                                                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                                                        <i class="fa-solid fa-power-off me-1"></i>Deactivate
-                                                    </button>
-                                                <?php else: ?>
+                                            <?php if ($meta['active']): ?>
+                                                <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deactivateModal_<?= md5($slug) ?>">
+                                                    <i class="fa-solid fa-power-off me-1"></i>Deactivate
+                                                </button>
+
+                                                <!-- Deactivation Confirmation & Purge Selection Modal -->
+                                                <div class="modal fade text-start" id="deactivateModal_<?= md5($slug) ?>" tabindex="-1">
+                                                    <div class="modal-dialog modal-md">
+                                                        <div class="modal-content">
+                                                            <div class="modal-header bg-danger text-white">
+                                                                <h5 class="modal-title h6 fw-bold"><i class="fa-solid fa-power-off me-2"></i>Deactivate Plugin: <?= htmlspecialchars($meta['name']) ?></h5>
+                                                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                                            </div>
+                                                            <form method="POST">
+                                                                <?php csrf_field(); ?>
+                                                                <input type="hidden" name="action" value="deactivate">
+                                                                <input type="hidden" name="plugin_slug" value="<?= htmlspecialchars($slug) ?>">
+
+                                                                <div class="modal-body">
+                                                                    <h6 class="fw-bold text-dark mb-2">1. Database Tables Handling</h6>
+                                                                    <div class="form-check mb-2 border rounded p-2 ps-4 bg-light">
+                                                                        <input class="form-check-input" type="radio" name="purge_tables" id="keep_db_<?= md5($slug) ?>" value="0" checked>
+                                                                        <label class="form-check-label fw-bold text-success" for="keep_db_<?= md5($slug) ?>">
+                                                                            <i class="fa-solid fa-database me-1"></i> Keep Database Tables (Recommended)
+                                                                        </label>
+                                                                        <div class="form-text text-muted small">Retain plugin database tables so your data is preserved if reactivated later.</div>
+                                                                    </div>
+
+                                                                    <div class="form-check mb-3 border rounded p-2 ps-4 bg-light">
+                                                                        <input class="form-check-input" type="radio" name="purge_tables" id="purge_db_<?= md5($slug) ?>" value="1">
+                                                                        <label class="form-check-label fw-bold text-danger" for="purge_db_<?= md5($slug) ?>">
+                                                                            <i class="fa-solid fa-trash-can me-1"></i> Purge & Drop Database Tables
+                                                                        </label>
+                                                                        <div class="form-text text-muted small">Completely drop all database tables created by this plugin. <strong class="text-danger">Warning: This action cannot be undone.</strong></div>
+                                                                    </div>
+
+                                                                    <hr class="my-3">
+
+                                                                    <h6 class="fw-bold text-dark mb-2">2. Confirmation Required</h6>
+                                                                    <p class="small text-muted mb-2">Type the exact plugin name <code><?= htmlspecialchars($meta['name']) ?></code> to confirm deactivation:</p>
+                                                                    <input type="text" name="confirm_name" class="form-control form-control-sm" placeholder="Type '<?= htmlspecialchars($meta['name']) ?>' here" required autocomplete="off">
+                                                                </div>
+
+                                                                <div class="modal-footer">
+                                                                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                                                    <button type="submit" class="btn btn-sm btn-danger">
+                                                                        <i class="fa-solid fa-power-off me-1"></i>Confirm Deactivation
+                                                                    </button>
+                                                                </div>
+                                                            </form>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            <?php else: ?>
+                                                <form method="POST" class="m-0 d-inline-block">
+                                                    <?php csrf_field(); ?>
+                                                    <input type="hidden" name="plugin_slug" value="<?= htmlspecialchars($slug) ?>">
                                                     <input type="hidden" name="action" value="activate">
                                                     <button type="submit" class="btn btn-sm btn-outline-success">
                                                         <i class="fa-solid fa-bolt me-1"></i>Activate
                                                     </button>
-                                                <?php endif; ?>
-                                            </form>
+                                                </form>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -263,12 +321,12 @@ require_once __DIR__ . '/header.php';
                 <i class="fa-solid fa-circle-info me-2"></i>Extension Info & Testing
             </div>
             <div class="card-body small">
+                <h6>Deactivation Options:</h6>
+                <p class="text-muted mb-3">When deactivating a plugin, you can choose to <strong>Keep Database Tables</strong> or <strong>Purge Database Tables</strong>, and you must type the plugin name to confirm.</p>
                 <h6>Plugin Safeguards:</h6>
                 <p class="text-muted mb-3">The framework wraps each plugin's booting, routes, and background tasks in isolated try-catch shields, ensuring bad plugins never block other plugins or crash the system.</p>
                 <h6>Verbose Compatibility Checker:</h6>
                 <p class="text-muted mb-3">Click <strong>Check Compatibility</strong> on any plugin to run a dry-run diagnostic test verifying syntax, permission namespaces, role collisions, and database SQL scripts before activation.</p>
-                <h6>Dynamic RBAC Integration:</h6>
-                <p class="text-muted mb-3">Activating a module automatically registers its declared custom Permissions and Roles in the centralized database directories, making them instantly visible inside the <strong>Users & RBAC</strong> panel.</p>
                 <h6>Database Prefix Sandbox:</h6>
                 <p class="text-muted mb-0">Plugins operate inside segregated database contexts using the prefix format <code>plug_{slug}_</code> to guarantee other modules remain uncompromised.</p>
             </div>
