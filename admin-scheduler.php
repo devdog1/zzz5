@@ -1,5 +1,5 @@
 <?php
-// admin-scheduler.php - Standalone Task Scheduler Overrides, Enablement, and Execution Logs Interface
+// admin-scheduler.php - Standalone Task Scheduler Overrides, Enablement, On-Demand Run, and Execution Logs Interface
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/Scheduler.php';
 
@@ -15,8 +15,9 @@ $db = get_db_connection();
 $scheduler = Scheduler::getInstance();
 $msg = '';
 $err = '';
+$on_demand_result = null;
 
-// Handle configuration updates and manual triggering
+// Handle configuration updates, manual cron triggers, and on-demand execution
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf();
     $action = $_POST['action'] ?? '';
@@ -43,6 +44,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $msg = "Scheduler overrides for task <code>" . htmlspecialchars($task_key) . "</code> updated successfully!";
             log_action('SCHEDULER_TASK_OVERRIDE_SAVE', ['task' => $task_key]);
+        } elseif ($action === 'run_on_demand') {
+            $task_key = $_POST['task_key'] ?? '';
+            $on_demand_result = $scheduler->runTaskOnDemand($task_key);
+            $msg = "Task <code>" . htmlspecialchars($task_key) . "</code> executed on demand in " . $on_demand_result['duration'] . "s!";
+            log_action('SCHEDULER_RUN_ON_DEMAND', ['task' => $task_key, 'duration' => $on_demand_result['duration']]);
         } elseif ($action === 'trigger_cron') {
             $scheduler->runPendingTasks();
             $msg = "Background cron check forced successfully!";
@@ -95,7 +101,7 @@ require_once __DIR__ . '/header.php';
 <div class="row mb-4 text-start">
     <div class="col-md-8">
         <h1 class="h2"><i class="fa-solid fa-clock-rotate-left text-warning me-2"></i>Task Scheduler Overrides</h1>
-        <p class="text-muted">Directly manage and change background crons registered by enabled modules. Toggle execution, define custom intervals, or set fixed weekly times.</p>
+        <p class="text-muted">Directly manage background crons, run tasks on demand, inspect real-time execution output, toggle execution, or set custom schedule overrides.</p>
     </div>
     <div class="col-md-4 text-md-end align-self-center">
         <form method="POST" class="d-inline-block">
@@ -107,6 +113,33 @@ require_once __DIR__ . '/header.php';
         </form>
     </div>
 </div>
+
+<?php if ($on_demand_result): ?>
+    <div class="card shadow-sm border-<?= $on_demand_result['success'] ? 'success' : 'danger' ?> mb-4 text-start">
+        <div class="card-header bg-<?= $on_demand_result['success'] ? 'success' : 'danger' ?> text-white d-flex justify-content-between align-items-center py-2">
+            <span class="fw-bold">
+                <i class="fa-solid fa-play me-2"></i>On-Demand Execution Result: <code><?= htmlspecialchars($on_demand_result['task_key']) ?></code>
+            </span>
+            <span class="badge bg-light text-dark">
+                Duration: <?= $on_demand_result['duration'] ?>s
+            </span>
+        </div>
+        <div class="card-body">
+            <?php if ($on_demand_result['error']): ?>
+                <div class="alert alert-danger small mb-3">
+                    <strong>Error:</strong> <?= htmlspecialchars($on_demand_result['error']) ?>
+                </div>
+            <?php endif; ?>
+
+            <h6 class="fw-bold text-dark mb-2"><i class="fa-solid fa-terminal me-1 text-secondary"></i>Task Captured Output:</h6>
+            <?php if (!empty($on_demand_result['output'])): ?>
+                <pre class="bg-dark text-light p-3 rounded small mb-0" style="max-height: 250px; overflow-y: auto; font-family: monospace;"><?= htmlspecialchars($on_demand_result['output']) ?></pre>
+            <?php else: ?>
+                <p class="text-muted small border rounded p-2 bg-light mb-0"><em>No stdout output was emitted by this task callback.</em></p>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
 
 <?php if (!empty($failed_tasks) || !empty($boot_errors)): ?>
     <div class="alert alert-danger shadow-sm mb-4 text-start" role="alert">
@@ -155,7 +188,7 @@ require_once __DIR__ . '/header.php';
                                     <th>Custom Override</th>
                                     <th>Status</th>
                                     <th>Next Scheduled Execution</th>
-                                    <th class="text-end">Configure</th>
+                                    <th class="text-end">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -194,8 +227,17 @@ require_once __DIR__ . '/header.php';
                                         </td>
                                         <td><code><?= htmlspecialchars($task['next_run'] ?: 'Pending Trigger') ?></code></td>
                                         <td class="text-end">
+                                            <form method="POST" class="d-inline-block me-1">
+                                                <?php csrf_field(); ?>
+                                                <input type="hidden" name="action" value="run_on_demand">
+                                                <input type="hidden" name="task_key" value="<?= htmlspecialchars($task['task_key']) ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-success" title="Execute this task immediately and view its output">
+                                                    <i class="fa-solid fa-play me-1"></i>Run On-Demand
+                                                </button>
+                                            </form>
+
                                             <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#taskModal<?= md5($task['task_key']) ?>">
-                                                <i class="fa-solid fa-gears me-1"></i>Edit Override
+                                                <i class="fa-solid fa-gears me-1"></i>Configure
                                             </button>
                                         </td>
                                     </tr>

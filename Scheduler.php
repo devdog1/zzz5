@@ -189,6 +189,108 @@ class Scheduler
     }
 
     /**
+     * Executes a task immediately on demand within current session context,
+     * capturing all output (echoes, print_r, stdout) and returning execution results.
+     */
+    public function runTaskOnDemand($target_key)
+    {
+        // Ensure tasks are registered
+        if (empty($this->tasks) && class_exists('PluginManager')) {
+            PluginManager::getInstance()->doAction('init_scheduler', $this);
+        }
+
+        $task = null;
+        if (isset($this->tasks[$target_key])) {
+            $task = $this->tasks[$target_key];
+        } else {
+            foreach ($this->tasks as $s_key => $t_info) {
+                if ($t_info['key'] === $target_key || $t_info['scoped_key'] === $target_key) {
+                    $task = $t_info;
+                    break;
+                }
+            }
+        }
+
+        if (!$task) {
+            throw new Exception("Task [{$target_key}] is not registered or its parent plugin is inactive.");
+        }
+
+        $scoped_key = $task['scoped_key'];
+        $db = get_db_connection();
+
+        // Update task status to running
+        $stmt = $db->prepare("
+            UPDATE scheduled_tasks
+            SET last_run = NOW(), status = 'running'
+            WHERE task_key = ?
+        ");
+        $stmt->execute([$scoped_key]);
+
+        // Start microtime tracking and output buffering
+        $start_time = microtime(true);
+        ob_start();
+
+        // Log execution initiation
+        $stmt_log = $db->prepare("
+            INSERT INTO scheduled_tasks_logs (task_key, run_started, status)
+            VALUES (?, NOW(), 'running')
+        ");
+        $stmt_log->execute([$scoped_key]);
+        $log_id = $db->lastInsertId();
+
+        $success = true;
+        $error_msg = null;
+
+        try {
+            call_user_func($task['callback']);
+        } catch (Throwable $t) {
+            $success = false;
+            $error_msg = $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
+            error_log("Scheduler On-Demand Error in task [{$scoped_key}]: " . $error_msg);
+
+            if (function_exists('log_action')) {
+                log_action('SCHEDULER_ON_DEMAND_CRASH', [
+                    'task_key' => $task['key'],
+                    'plugin_slug' => $task['plugin'],
+                    'error' => $error_msg
+                ]);
+            }
+        }
+
+        $captured_output = ob_get_clean();
+        $duration = round(microtime(true) - $start_time, 4);
+        $status = $success ? 'success' : 'failed';
+
+        // Update task DB state
+        $stmt = $db->prepare("
+            UPDATE scheduled_tasks
+            SET status = ?, error_message = ?
+            WHERE task_key = ?
+        ");
+        $stmt->execute([$status, $error_msg, $scoped_key]);
+
+        // Complete log row
+        $stmt_log_update = $db->prepare("
+            UPDATE scheduled_tasks_logs
+            SET run_ended = NOW(),
+                status = ?,
+                duration_seconds = ?,
+                error_message = ?
+            WHERE id = ?
+        ");
+        $stmt_log_update->execute([$status, $duration, $error_msg, $log_id]);
+
+        return [
+            'success' => $success,
+            'task_key' => $scoped_key,
+            'plugin' => $task['plugin'],
+            'output' => trim($captured_output),
+            'duration' => $duration,
+            'error' => $error_msg
+        ];
+    }
+
+    /**
      * Executes a single task's callback directly within the current process context.
      * This is invoked by asynchronous spawned background subprocesses.
      */
