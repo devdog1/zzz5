@@ -54,7 +54,7 @@ class Auth
         $userInfo = $this->sso->getUserInfo($tokens['id_token']);
         $groups   = $this->sso->getUserGroups($tokens['access_token']);
 
-        $azureOid = $userInfo['sub'] ?? '';
+        $azureOid = $userInfo['oid'] ?? $userInfo['sub'] ?? '';
         $email    = $userInfo['preferred_username'] ?? '';
         $name     = $userInfo['name'] ?? '';
 

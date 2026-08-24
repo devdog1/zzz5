@@ -386,19 +386,29 @@ class AzureADSSO
             }
 
             if (!empty($userId)) {
-                // Determine if $userId is GUID or userPrincipalName / email
+                // Check if $userId is a valid UUID or valid email address (containing @)
                 $isGuid = preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $userId);
-                $userBindUrl = $isGuid
-                    ? "https://graph.microsoft.com/v1.0/users('{$userId}')"
-                    : "https://graph.microsoft.com/v1.0/users('" . urlencode($userId) . "')";
+                $isEmail = str_contains($userId, '@');
 
-                if (!isset($seenBinds[$userBindUrl])) {
-                    $seenBinds[$userBindUrl] = true;
-                    $formattedMembers[] = [
-                        '@odata.type' => '#microsoft.graph.aadUserConversationMember',
-                        'roles' => ['owner'],
-                        'user@odata.bind' => $userBindUrl
-                    ];
+                // Filter out non-UUID, non-email strings (like pairwise subject tokens MWfRNK...)
+                if ($isGuid || $isEmail) {
+                    $userBindUrl = $isGuid
+                        ? "https://graph.microsoft.com/v1.0/users('{$userId}')"
+                        : "https://graph.microsoft.com/v1.0/users('" . urlencode($userId) . "')";
+
+                    if (!isset($seenBinds[$userBindUrl])) {
+                        $seenBinds[$userBindUrl] = true;
+                        $formattedMembers[] = [
+                            '@odata.type' => '#microsoft.graph.aadUserConversationMember',
+                            'roles' => ['owner'],
+                            'user@odata.bind' => $userBindUrl
+                        ];
+                    }
+                } else {
+                    $this->logAzureAction('AZURE_CREATE_CHAT_SKIPPED_INVALID_USER', [
+                        'skipped_identifier' => $userId,
+                        'reason' => 'Identifier is neither a valid UUID nor email address'
+                    ]);
                 }
             }
         }
