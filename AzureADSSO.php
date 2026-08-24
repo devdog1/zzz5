@@ -366,35 +366,44 @@ class AzureADSSO
             return null;
         }
 
-        // Format Graph API Chat Members payload (#microsoft.graph.aadUserConversationMember)
+        // Ensure the current authenticated user (caller) is included in the members list
+        // Microsoft Teams API requires the calling user to be explicitly listed as a member/owner
+        $currentCallerId = $_SESSION['user']['azure_oid'] ?? $_SESSION['user']['email'] ?? null;
+        if (!empty($currentCallerId)) {
+            $membersInput[] = $currentCallerId;
+        }
+
+        // Format Graph API Chat Members payload (#microsoft.graph.aadUserConversationMember) with deduplication
         $formattedMembers = [];
+        $seenBinds = [];
+
         foreach ($membersInput as $m) {
             $userId = null;
             if (is_array($m)) {
-                $userId = $m['id'] ?? $m['userPrincipalName'] ?? $m['user_id'] ?? null;
+                $userId = $m['id'] ?? $m['userPrincipalName'] ?? $m['mail'] ?? $m['user_id'] ?? null;
             } elseif (is_string($m)) {
                 $userId = trim($m);
             }
 
             if (!empty($userId)) {
-                // Determine if $userId is GUID or userPrincipalName
+                // Determine if $userId is GUID or userPrincipalName / email
                 $userBindUrl = (preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $userId))
                     ? "https://graph.microsoft.com/v1.0/users('{$userId}')"
                     : "https://graph.microsoft.com/v1.0/users('" . urlencode($userId) . "')";
 
-                $formattedMembers[] = [
-                    '@odata.type' => '#microsoft.graph.aadUserConversationMember',
-                    'roles' => ['owner'],
-                    'user@odata.bind' => $userBindUrl
-                ];
+                if (!isset($seenBinds[$userBindUrl])) {
+                    $seenBinds[$userBindUrl] = true;
+                    $formattedMembers[] = [
+                        '@odata.type' => '#microsoft.graph.aadUserConversationMember',
+                        'roles' => ['owner'],
+                        'user@odata.bind' => $userBindUrl
+                    ];
+                }
             }
         }
 
-        // Must have at least 2 members for a group chat
-        $chatType = (count($formattedMembers) > 2) ? 'group' : 'group';
-
         $payload = [
-            'chatType' => $chatType,
+            'chatType' => 'group',
             'topic'    => $topic,
             'members'  => $formattedMembers
         ];
