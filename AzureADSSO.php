@@ -120,19 +120,24 @@ class AzureADSSO
      */
     public function getGroupMembers($groupId, $accessToken = null)
     {
-        $groupId = trim((string)$groupId);
+        $arg1 = trim((string)$groupId);
+        $arg2 = trim((string)$accessToken);
+
+        // Detect if caller swapped arguments: getGroupMembers($accessToken, $groupId)
+        if (str_starts_with($arg1, 'eyJ') || str_contains($arg1, '.') || strlen($arg1) > 150) {
+            $groupId = $arg2;
+            $accessToken = $arg1;
+            $this->logAzureAction('AZURE_GET_GROUP_MEMBERS_SWAPPED_ARGS', [
+                'reason' => 'Detected inverted parameters: accessToken was passed as first argument and groupId as second. Automatically swapped.',
+                'group_id' => $groupId
+            ]);
+        } else {
+            $groupId = $arg1;
+            $accessToken = $arg2;
+        }
 
         if (empty($groupId)) {
             $this->logAzureAction('AZURE_GET_GROUP_MEMBERS_SKIPPED', ['reason' => 'Empty Group ID provided']);
-            return [];
-        }
-
-        // Detect if a JWT token was accidentally passed as $groupId
-        if (str_starts_with($groupId, 'eyJ') || str_contains($groupId, '.') || strlen($groupId) > 150) {
-            $this->logAzureAction('AZURE_GET_GROUP_MEMBERS_INVALID_INPUT', [
-                'reason' => 'JWT access token string was passed as groupId parameter instead of Group Object ID/Name',
-                'input_preview' => substr($groupId, 0, 30) . '...'
-            ]);
             return [];
         }
 
@@ -247,7 +252,44 @@ class AzureADSSO
 
     public function getAllGroups()
     {
-        // Fetch app-only access token using Client Credentials Grant
+        // 1. First try using user's delegated OAuth access token (which contains user delegated Group.Read.All scope)
+        $userAccessToken = null;
+        if (function_exists('get_azure_access_token')) {
+            $userAccessToken = get_azure_access_token();
+        } else {
+            $userAccessToken = $_SESSION['user']['access_token'] ?? $_SESSION['access_token'] ?? $_SESSION['azure_access_token'] ?? $_SESSION['tokens']['access_token'] ?? null;
+        }
+
+        $queryGroups = function($token) {
+            $graphUrl = "https://graph.microsoft.com/v1.0/groups?\$select=id,displayName,description";
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $graphUrl);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json',
+            ]);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+            return ['code' => $httpCode, 'response' => $response, 'error' => $curlError];
+        };
+
+        if (!empty($userAccessToken)) {
+            $res = $queryGroups($userAccessToken);
+            if ($res['code'] == 200) {
+                $data = json_decode($res['response'], true);
+                if (isset($data['value'])) {
+                    $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($data['value']), 'token_type' => 'delegated_user_token']);
+                    return $data['value'];
+                }
+            } else {
+                $this->logAzureAction('AZURE_GET_ALL_GROUPS_DELEGATED_FAILED', ['http_code' => $res['code'], 'response' => $res['response']]);
+            }
+        }
+
+        // 2. Fall back to app Client Credentials Token
         $tokenUrl = "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token";
         $postFields = [
             'grant_type'    => 'client_credentials',
@@ -257,37 +299,20 @@ class AzureADSSO
         ];
 
         $tokenRes = $this->makePostRequest($tokenUrl, $postFields);
-        if (!$tokenRes || empty($tokenRes['access_token'])) {
-            $this->logAzureAction('AZURE_GET_ALL_GROUPS_TOKEN_FAILED', ['tenant_id' => $this->tenantId, 'client_id' => $this->clientId]);
-            return [];
-        }
-
-        $accessToken = $tokenRes['access_token'];
-        $graphUrl = "https://graph.microsoft.com/v1.0/groups?\$select=id,displayName,description";
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $graphUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Authorization: Bearer ' . $accessToken,
-            'Content-Type: application/json',
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
-
-        if ($httpCode == 200) {
-            $data = json_decode($response, true);
-            if (isset($data['value'])) {
-                $groups = $data['value'];
-                $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($groups)]);
-                return $groups;
+        if ($tokenRes && !empty($tokenRes['access_token'])) {
+            $appAccessToken = $tokenRes['access_token'];
+            $res = $queryGroups($appAccessToken);
+            if ($res['code'] == 200) {
+                $data = json_decode($res['response'], true);
+                if (isset($data['value'])) {
+                    $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($data['value']), 'token_type' => 'app_client_credentials']);
+                    return $data['value'];
+                }
+            } else {
+                $this->logAzureAction('AZURE_GET_ALL_GROUPS_ERROR', ['http_code' => $res['code'], 'response' => $res['response'], 'curl_error' => $res['error']]);
             }
         }
 
-        $this->logAzureAction('AZURE_GET_ALL_GROUPS_ERROR', ['http_code' => $httpCode, 'response' => $response, 'curl_error' => $curlError]);
         return [];
     }
 
