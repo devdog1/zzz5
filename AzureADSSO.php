@@ -459,6 +459,145 @@ class AzureADSSO
         return null;
     }
 
+    /**
+     * Send an Adaptive Card or message to a Microsoft Teams chat conversation using Microsoft Graph API
+     * (POST /chats/{chatId}/messages).
+     * Flexible argument handling supports various caller signatures:
+     *   - sendAdaptiveCardToChat($chatId, $cardContent, $accessToken)
+     *   - sendAdaptiveCardToChat($accessToken, $chatId, $cardContent)
+     *   - sendAdaptiveCardToChat($chatId, $accessToken, $cardContent)
+     *
+     * @param mixed $arg1 Chat ID, Adaptive Card content, or Access Token
+     * @param mixed $arg2 Chat ID, Adaptive Card content, or Access Token
+     * @param mixed $arg3 Chat ID, Adaptive Card content, or Access Token
+     * @return array|null Message payload object returned by Graph API
+     */
+    public function sendAdaptiveCardToChat($arg1 = null, $arg2 = null, $arg3 = null)
+    {
+        $chatId = null;
+        $cardContent = null;
+        $accessToken = null;
+
+        // Inspect all 3 arguments to classify them
+        $args = [$arg1, $arg2, $arg3];
+
+        foreach ($args as $a) {
+            if (empty($a)) continue;
+
+            if (is_array($a)) {
+                $cardContent = $a;
+            } elseif (is_string($a)) {
+                $str = trim($a);
+                if (str_starts_with($str, 'eyJ') || str_contains($str, '.') || strlen($str) > 150) {
+                    $accessToken = $str;
+                } elseif (str_contains($str, '@thread.v2') || str_contains($str, '19:')) {
+                    $chatId = $str;
+                } elseif (is_array(json_decode($str, true))) {
+                    $cardContent = json_decode($str, true);
+                } else {
+                    if (empty($chatId)) {
+                        $chatId = $str;
+                    } else {
+                        $cardContent = $str;
+                    }
+                }
+            }
+        }
+
+        // Determine access token if not explicitly supplied
+        if (empty($accessToken)) {
+            if (function_exists('get_azure_access_token')) {
+                $accessToken = get_azure_access_token();
+            } else {
+                $accessToken = $_SESSION['user']['access_token'] ?? $_SESSION['access_token'] ?? $_SESSION['azure_access_token'] ?? $_SESSION['tokens']['access_token'] ?? null;
+            }
+        }
+
+        if (empty($chatId)) {
+            $this->logAzureAction('AZURE_SEND_ADAPTIVE_CARD_FAILED', ['reason' => 'Empty Chat ID provided']);
+            return null;
+        }
+
+        if (empty($accessToken)) {
+            $this->logAzureAction('AZURE_SEND_ADAPTIVE_CARD_FAILED', ['chat_id' => $chatId, 'reason' => 'No OAuth access token available']);
+            return null;
+        }
+
+        // Format Microsoft Graph API chat message payload containing Adaptive Card attachment
+        if (is_array($cardContent)) {
+            // Adaptive Card JSON schema
+            if (!isset($cardContent['type'])) {
+                $cardContent['type'] = 'AdaptiveCard';
+            }
+            if (!isset($cardContent['$schema'])) {
+                $cardContent['$schema'] = 'http://adaptivecards.io/schemas/adaptive-card.json';
+            }
+            if (!isset($cardContent['version'])) {
+                $cardContent['version'] = '1.2';
+            }
+
+            $messagePayload = [
+                'body' => [
+                    'contentType' => 'html',
+                    'content' => '<attachment id="adaptiveCardAttachment"></attachment>'
+                ],
+                'attachments' => [
+                    [
+                        'id' => 'adaptiveCardAttachment',
+                        'contentType' => 'application/vnd.microsoft.card.adaptive',
+                        'content' => json_encode($cardContent, JSON_UNESCAPED_SLASHES)
+                    ]
+                ]
+            ];
+        } else {
+            // Plain text or HTML message
+            $messagePayload = [
+                'body' => [
+                    'contentType' => str_contains($cardContent ?? '', '<') ? 'html' : 'text',
+                    'content' => (string)($cardContent ?? 'Incident Notification')
+                ]
+            ];
+        }
+
+        $graphUrl = "https://graph.microsoft.com/v1.0/chats/" . urlencode($chatId) . "/messages";
+        $jsonPayload = json_encode($messagePayload, JSON_UNESCAPED_SLASHES);
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $graphUrl);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $accessToken,
+            'Content-Type: application/json',
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($httpCode == 201 || $httpCode == 200) {
+            $msgData = json_decode($response, true);
+            $this->logAzureAction('AZURE_SEND_ADAPTIVE_CARD_SUCCESS', [
+                'chat_id' => $chatId,
+                'message_id' => $msgData['id'] ?? null,
+                'request_payload_json' => $jsonPayload
+            ]);
+            return $msgData;
+        }
+
+        $this->logAzureAction('AZURE_SEND_ADAPTIVE_CARD_ERROR', [
+            'chat_id' => $chatId,
+            'http_code' => $httpCode,
+            'request_payload_json' => $jsonPayload,
+            'response' => $response,
+            'curl_error' => $curlError
+        ]);
+
+        return null;
+    }
+
     private function makePostRequest($url, $postFields)
     {
         $ch = curl_init();
