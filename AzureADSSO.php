@@ -743,6 +743,25 @@ class AzureADSSO
         return !empty($results) ? $results : null;
     }
 
+    /**
+     * Send a text, HTML, or Adaptive Card message to a Microsoft Teams chat conversation using Microsoft Graph API
+     * (POST /chats/{chatId}/messages).
+     * Flexible argument handling supports various caller signatures:
+     *   - sendMessageToChat($chatId, $messageContent, $accessToken)
+     *   - sendMessageToChat($accessToken, $chatId, $messageContent)
+     *   - sendMessageToChat($chatId, $accessToken, $messageContent)
+     *
+     * @param mixed $arg1 Chat ID, Message content, or Access Token
+     * @param mixed $arg2 Chat ID, Message content, or Access Token
+     * @param mixed $arg3 Chat ID, Message content, or Access Token
+     * @return array|null Message payload object returned by Graph API
+     */
+    public function sendMessageToChat($arg1 = null, $arg2 = null, $arg3 = null)
+    {
+        // Delegate directly to sendAdaptiveCardToChat which handles text, HTML, and Adaptive Cards flexibly
+        return $this->sendAdaptiveCardToChat($arg1, $arg2, $arg3);
+    }
+
     private function makePostRequest($url, $postFields)
     {
         $ch = curl_init();
