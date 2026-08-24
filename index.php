@@ -184,6 +184,19 @@ $widgets_raw_html = ob_get_clean();
 
                 $widget_html = substr($widgets_raw_html, $start_index, $end_index - $start_index);
 
+                // Strip hardcoded outer grid col-* classes from plugin root div so it dynamically adopts resized width
+                $widget_html = preg_replace_callback('/^<div(\b[^>]*)\bclass=["\']([^"\']*)["\']/i', function($m) {
+                    $attrs = $m[1];
+                    $classes = $m[2];
+                    // Remove col-*, col-sm-*, col-md-*, col-lg-*, col-xl-* hardcoded grid classes
+                    $cleaned_classes = trim(preg_replace('/\bcol-(?:12|[1-9]|1[0-1])\b|\bcol-(?:sm|md|lg|xl|xxl)-(?:12|[1-9]|1[0-1])\b/i', '', $classes));
+                    // Ensure w-100 is present
+                    if (strpos($cleaned_classes, 'w-100') === false) {
+                        $cleaned_classes .= ' w-100';
+                    }
+                    return '<div' . $attrs . ' class="' . trim($cleaned_classes) . '"';
+                }, $widget_html, 1);
+
                 // Check saved user preference for this widget
                 $pref = $userWidgetPrefs[$w_key] ?? null;
 
