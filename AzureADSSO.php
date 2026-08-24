@@ -366,8 +366,7 @@ class AzureADSSO
             return null;
         }
 
-        // Ensure the current authenticated user (caller) is included in the members list
-        // Microsoft Teams API requires the calling user to be explicitly listed as a member/owner
+        // Ensure current caller ID/UPN is included in members list
         $currentCallerId = $_SESSION['user']['azure_oid'] ?? $_SESSION['user']['email'] ?? null;
         if (!empty($currentCallerId)) {
             $membersInput[] = $currentCallerId;
@@ -380,14 +379,16 @@ class AzureADSSO
         foreach ($membersInput as $m) {
             $userId = null;
             if (is_array($m)) {
-                $userId = $m['id'] ?? $m['userPrincipalName'] ?? $m['mail'] ?? $m['user_id'] ?? null;
+                // Prefer id (Object ID UUID) if present, then userPrincipalName, mail, or user_id
+                $userId = !empty($m['id']) ? $m['id'] : (!empty($m['userPrincipalName']) ? $m['userPrincipalName'] : (!empty($m['mail']) ? $m['mail'] : ($m['user_id'] ?? null)));
             } elseif (is_string($m)) {
                 $userId = trim($m);
             }
 
             if (!empty($userId)) {
                 // Determine if $userId is GUID or userPrincipalName / email
-                $userBindUrl = (preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $userId))
+                $isGuid = preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $userId);
+                $userBindUrl = $isGuid
                     ? "https://graph.microsoft.com/v1.0/users('{$userId}')"
                     : "https://graph.microsoft.com/v1.0/users('" . urlencode($userId) . "')";
 
@@ -408,12 +409,13 @@ class AzureADSSO
             'members'  => $formattedMembers
         ];
 
+        $jsonPayload = json_encode($payload, JSON_UNESCAPED_SLASHES);
         $graphUrl = "https://graph.microsoft.com/v1.0/chats";
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $graphUrl);
         curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Authorization: Bearer ' . $accessToken,
@@ -430,7 +432,8 @@ class AzureADSSO
             $this->logAzureAction('AZURE_CREATE_CHAT_SUCCESS', [
                 'topic' => $topic,
                 'chat_id' => $chatData['id'] ?? null,
-                'web_url' => $chatData['webUrl'] ?? null
+                'web_url' => $chatData['webUrl'] ?? null,
+                'request_payload_json' => $jsonPayload
             ]);
             return $chatData;
         }
@@ -438,6 +441,7 @@ class AzureADSSO
         $this->logAzureAction('AZURE_CREATE_CHAT_ERROR', [
             'topic' => $topic,
             'http_code' => $httpCode,
+            'request_payload_json' => $jsonPayload,
             'response' => $response,
             'curl_error' => $curlError
         ]);
