@@ -316,6 +316,126 @@ class AzureADSSO
         return [];
     }
 
+    /**
+     * Create a Microsoft Teams Chat conversation using Microsoft Graph API (POST /chats).
+     * Flexible argument handling supports various caller signatures:
+     *   - createChat($members, $topic, $accessToken)
+     *   - createChat($accessToken, $members, $topic)
+     *   - createChat($topic, $members, $accessToken)
+     *
+     * @param mixed $arg1 Members list, Topic title, or OAuth Access Token
+     * @param mixed $arg2 Members list, Topic title, or OAuth Access Token
+     * @param mixed $arg3 Members list, Topic title, or OAuth Access Token
+     * @return array|null Created Chat payload object (containing 'id', 'webUrl', etc.)
+     */
+    public function createChat($arg1 = null, $arg2 = null, $arg3 = null)
+    {
+        $membersInput = [];
+        $topic = 'Incident Chat';
+        $accessToken = null;
+
+        // Inspect all 3 arguments to classify them
+        $args = [$arg1, $arg2, $arg3];
+
+        foreach ($args as $a) {
+            if (empty($a)) continue;
+
+            if (is_array($a)) {
+                $membersInput = $a;
+            } elseif (is_string($a)) {
+                $str = trim($a);
+                if (str_starts_with($str, 'eyJ') || str_contains($str, '.') || strlen($str) > 150) {
+                    $accessToken = $str;
+                } else {
+                    $topic = $str;
+                }
+            }
+        }
+
+        // Determine access token if not explicitly supplied
+        if (empty($accessToken)) {
+            if (function_exists('get_azure_access_token')) {
+                $accessToken = get_azure_access_token();
+            } else {
+                $accessToken = $_SESSION['user']['access_token'] ?? $_SESSION['access_token'] ?? $_SESSION['azure_access_token'] ?? $_SESSION['tokens']['access_token'] ?? null;
+            }
+        }
+
+        if (empty($accessToken)) {
+            $this->logAzureAction('AZURE_CREATE_CHAT_FAILED', ['reason' => 'No OAuth access token available']);
+            return null;
+        }
+
+        // Format Graph API Chat Members payload (#microsoft.graph.aadUserConversationMember)
+        $formattedMembers = [];
+        foreach ($membersInput as $m) {
+            $userId = null;
+            if (is_array($m)) {
+                $userId = $m['id'] ?? $m['userPrincipalName'] ?? $m['user_id'] ?? null;
+            } elseif (is_string($m)) {
+                $userId = trim($m);
+            }
+
+            if (!empty($userId)) {
+                // Determine if $userId is GUID or userPrincipalName
+                $userBindUrl = (preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $userId))
+                    ? "https://graph.microsoft.com/v1.0/users('{$userId}')"
+                    : "https://graph.microsoft.com/v1.0/users('" . urlencode($userId) . "')";
+
+                $formattedMembers[] = [
+                    '@odata.type' => '#microsoft.graph.aadUserConversationMember',
+                    'roles' => ['owner'],
+                    'user@odata.bind' => $userBindUrl
+                ];
+            }
+        }
+
+        // Must have at least 2 members for a group chat
+        $chatType = (count($formattedMembers) > 2) ? 'group' : 'group';
+
+        $payload = [
+            'chatType' => $chatType,
+            'topic'    => $topic,
+            'members'  => $formattedMembers
+        ];
+
+        $graphUrl = "https://graph.microsoft.com/v1.0/chats";
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $graphUrl);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $accessToken,
+            'Content-Type: application/json',
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($httpCode == 201 || $httpCode == 200) {
+            $chatData = json_decode($response, true);
+            $this->logAzureAction('AZURE_CREATE_CHAT_SUCCESS', [
+                'topic' => $topic,
+                'chat_id' => $chatData['id'] ?? null,
+                'web_url' => $chatData['webUrl'] ?? null
+            ]);
+            return $chatData;
+        }
+
+        $this->logAzureAction('AZURE_CREATE_CHAT_ERROR', [
+            'topic' => $topic,
+            'http_code' => $httpCode,
+            'response' => $response,
+            'curl_error' => $curlError
+        ]);
+
+        return null;
+    }
+
     private function makePostRequest($url, $postFields)
     {
         $ch = curl_init();
