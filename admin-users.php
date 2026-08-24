@@ -229,11 +229,11 @@ require_once __DIR__ . '/header.php';
 
                                     <!-- Modal for each user editing -->
                                     <div class="modal fade" id="editModal<?= $user['id'] ?>" tabindex="-1">
-                                        <div class="modal-dialog modal-lg">
+                                        <div class="modal-dialog modal-xl">
                                             <div class="modal-content">
-                                                <div class="modal-header">
+                                                <div class="modal-header bg-dark text-white">
                                                     <h5 class="modal-title"><i class="fa-solid fa-user-shield me-2 text-primary"></i>Edit Privileges for <?= htmlspecialchars($user['display_name']) ?></h5>
-                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                                                 </div>
                                                 <form method="POST">
                                                     <?php csrf_field(); ?>
@@ -243,14 +243,14 @@ require_once __DIR__ . '/header.php';
 
                                                         <!-- Roles section -->
                                                         <h6 class="fw-bold border-bottom pb-2 mb-3"><i class="fa-solid fa-tags me-1"></i>Assign Roles</h6>
-                                                        <div class="row mb-4">
+                                                        <div class="row g-3 mb-4">
                                                             <?php foreach ($roles as $r): ?>
-                                                                <div class="col-md-4">
-                                                                    <div class="form-check">
-                                                                        <input class="form-check-input" type="checkbox" name="roles[]" value="<?= $r['id'] ?>" id="role_<?= $user['id'] ?>_<?= $r['id'] ?>" <?= in_array($r['id'], $user_role_ids) ? 'checked' : '' ?>>
-                                                                        <label class="form-check-label" for="role_<?= $user['id'] ?>_<?= $r['id'] ?>">
-                                                                            <strong><?= ucfirst(htmlspecialchars($r['role_name'])) ?></strong>
-                                                                            <div class="text-muted small"><?= htmlspecialchars($r['description']) ?></div>
+                                                                <div class="col-12 col-md-6 col-lg-4">
+                                                                    <div class="form-check p-2 border rounded bg-light h-100 d-flex align-items-start gap-2">
+                                                                        <input class="form-check-input mt-1 flex-shrink-0 ms-0 me-1" type="checkbox" name="roles[]" value="<?= $r['id'] ?>" id="role_<?= $user['id'] ?>_<?= $r['id'] ?>" <?= in_array($r['id'], $user_role_ids) ? 'checked' : '' ?>>
+                                                                        <label class="form-check-label w-100 text-break mb-0" for="role_<?= $user['id'] ?>_<?= $r['id'] ?>">
+                                                                            <strong class="d-block text-dark text-break" style="word-break: break-word; overflow-wrap: anywhere;"><?= ucfirst(htmlspecialchars($r['role_name'])) ?></strong>
+                                                                            <div class="text-muted small text-break" style="word-break: break-word; overflow-wrap: anywhere;"><?= htmlspecialchars($r['description']) ?></div>
                                                                         </label>
                                                                     </div>
                                                                 </div>
@@ -259,13 +259,13 @@ require_once __DIR__ . '/header.php';
 
                                                         <!-- Direct Permissions Section -->
                                                         <h6 class="fw-bold border-bottom pb-2 mb-3"><i class="fa-solid fa-plus-circle me-1 text-success"></i>Directly Grant Extra Permissions</h6>
-                                                        <div class="row mb-4">
+                                                        <div class="row g-2 mb-4">
                                                             <?php foreach ($permissions as $p): ?>
-                                                                <div class="col-md-4">
-                                                                    <div class="form-check">
-                                                                        <input class="form-check-input" type="checkbox" name="direct_permissions[]" value="<?= $p['id'] ?>" id="perm_g_<?= $user['id'] ?>_<?= $p['id'] ?>" <?= in_array($p['id'], $user_direct_perm_ids) ? 'checked' : '' ?>>
-                                                                        <label class="form-check-label" for="perm_g_<?= $user['id'] ?>_<?= $p['id'] ?>">
-                                                                            <code><?= htmlspecialchars($p['permission_name']) ?></code>
+                                                                <div class="col-12 col-md-6 col-lg-4">
+                                                                    <div class="form-check p-2 border rounded bg-light h-100 d-flex align-items-center gap-2">
+                                                                        <input class="form-check-input flex-shrink-0 mt-0 ms-0 me-1" type="checkbox" name="direct_permissions[]" value="<?= $p['id'] ?>" id="perm_g_<?= $user['id'] ?>_<?= $p['id'] ?>" <?= in_array($p['id'], $user_direct_perm_ids) ? 'checked' : '' ?>>
+                                                                        <label class="form-check-label text-break w-100 mb-0" for="perm_g_<?= $user['id'] ?>_<?= $p['id'] ?>">
+                                                                            <code class="text-break text-wrap d-inline-block" style="word-break: break-all; overflow-wrap: anywhere; max-width: 100%;"><?= htmlspecialchars($p['permission_name']) ?></code>
                                                                         </label>
                                                                     </div>
                                                                 </div>
@@ -274,13 +274,13 @@ require_once __DIR__ . '/header.php';
 
                                                         <!-- Denied Permissions Section -->
                                                         <h6 class="fw-bold border-bottom pb-2 mb-3"><i class="fa-solid fa-minus-circle me-1 text-danger"></i>Explicitly Deny Permissions (Highest Precedence)</h6>
-                                                        <div class="row">
+                                                        <div class="row g-2">
                                                             <?php foreach ($permissions as $p): ?>
-                                                                <div class="col-md-4">
-                                                                    <div class="form-check">
-                                                                        <input class="form-check-input" type="checkbox" name="denied_permissions[]" value="<?= $p['id'] ?>" id="perm_d_<?= $user['id'] ?>_<?= $p['id'] ?>" <?= in_array($p['id'], $user_denied_perm_ids) ? 'checked' : '' ?>>
-                                                                        <label class="form-check-label" for="perm_d_<?= $user['id'] ?>_<?= $p['id'] ?>">
-                                                                            <code><?= htmlspecialchars($p['permission_name']) ?></code>
+                                                                <div class="col-12 col-md-6 col-lg-4">
+                                                                    <div class="form-check p-2 border rounded bg-light h-100 d-flex align-items-center gap-2">
+                                                                        <input class="form-check-input flex-shrink-0 mt-0 ms-0 me-1" type="checkbox" name="denied_permissions[]" value="<?= $p['id'] ?>" id="perm_d_<?= $user['id'] ?>_<?= $p['id'] ?>" <?= in_array($p['id'], $user_denied_perm_ids) ? 'checked' : '' ?>>
+                                                                        <label class="form-check-label text-break w-100 mb-0" for="perm_d_<?= $user['id'] ?>_<?= $p['id'] ?>">
+                                                                            <code class="text-break text-wrap d-inline-block" style="word-break: break-all; overflow-wrap: anywhere; max-width: 100%;"><?= htmlspecialchars($p['permission_name']) ?></code>
                                                                         </label>
                                                                     </div>
                                                                 </div>
