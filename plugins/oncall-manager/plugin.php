@@ -447,7 +447,7 @@ add_action('index_dashboard_widgets', function($user_context) {
             $status_icon = 'fa-solid fa-circle-minus';
         }
         ?>
-        <div class="col-12 mb-4 text-start">
+        <div class="col-12 mb-4 text-start widget-block" data-widget-key="oncall_dept_<?php echo $dept['id']; ?>" data-widget-title="<?php echo htmlspecialchars($dept['name']); ?> On-Call Coverage">
             <div class="card shadow-sm border-0 border-start border-4 border-warning">
                 <div class="card-body p-4">
                     <!-- Top Header Row -->

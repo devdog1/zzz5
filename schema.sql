@@ -140,6 +140,18 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks_logs (
     FOREIGN KEY (task_key) REFERENCES scheduled_tasks(task_key) ON DELETE CASCADE
 );
 
+-- 8. User Dashboard Widget Preferences Table
+CREATE TABLE IF NOT EXISTS user_widget_preferences (
+    user_id INT NOT NULL,
+    widget_key VARCHAR(150) NOT NULL,
+    is_visible TINYINT(1) DEFAULT 1,
+    width_class VARCHAR(50) DEFAULT 'col-12', -- col-12, col-lg-8, col-lg-6, col-lg-4
+    sort_order INT DEFAULT 100,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, widget_key),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 INSERT IGNORE INTO permissions (id, permission_name, description) VALUES
 (1, 'manage_settings', 'Modify system and plugin settings'),
 (2, 'manage_plugins', 'Activate/Deactivate plugins'),

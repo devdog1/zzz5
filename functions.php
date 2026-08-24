@@ -191,6 +191,51 @@ function get_audit_logs($limit = 100) {
 }
 
 /* =========================================================
+ * USER DASHBOARD WIDGET PREFERENCES API
+ * ========================================================= */
+
+/**
+ * Fetch a user's widget preferences indexed by widget_key.
+ */
+function get_user_widget_preferences($user_id) {
+    try {
+        $db = get_db_connection();
+        $stmt = $db->prepare("SELECT widget_key, is_visible, width_class, sort_order FROM user_widget_preferences WHERE user_id = ? ORDER BY sort_order ASC");
+        $stmt->execute([(int)$user_id]);
+        $rows = $stmt->fetchAll();
+        $prefs = [];
+        foreach ($rows as $r) {
+            $prefs[$r['widget_key']] = $r;
+        }
+        return $prefs;
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+/**
+ * Save user's widget preference for a specific widget key.
+ */
+function save_user_widget_preference($user_id, $widget_key, $is_visible, $width_class, $sort_order) {
+    try {
+        $db = get_db_connection();
+        $stmt = $db->prepare("
+            INSERT INTO user_widget_preferences (user_id, widget_key, is_visible, width_class, sort_order)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                is_visible = VALUES(is_visible),
+                width_class = VALUES(width_class),
+                sort_order = VALUES(sort_order),
+                updated_at = NOW()
+        ");
+        $stmt->execute([(int)$user_id, $widget_key, (int)$is_visible, $width_class, (int)$sort_order]);
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+/* =========================================================
  * USER DIRECTORY MANAGEMENT API
  * ========================================================= */
 

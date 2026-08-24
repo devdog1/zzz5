@@ -27,37 +27,213 @@ if ($route) {
     }
 }
 
-// Otherwise, render Core Dashboard Portal Screen
+// Handle POST AJAX action to save dashboard widget preferences
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_widget_preferences') {
+    validate_csrf();
+    $user_id = $_SESSION['user_id'] ?? null;
+    if ($user_id) {
+        $prefs_json = $_POST['preferences'] ?? '[]';
+        $prefs = json_decode($prefs_json, true);
+        if (is_array($prefs)) {
+            foreach ($prefs as $index => $item) {
+                $widget_key = trim($item['widget_key'] ?? '');
+                $is_visible = !empty($item['is_visible']) ? 1 : 0;
+                $width_class = trim($item['width_class'] ?? 'col-12');
+                $sort_order = (int)($item['sort_order'] ?? (($index + 1) * 10));
+
+                if (!empty($widget_key)) {
+                    save_user_widget_preference($user_id, $widget_key, $is_visible, $width_class, $sort_order);
+                }
+            }
+            log_action('SAVE_WIDGET_PREFERENCES', ['user_id' => $user_id]);
+            echo json_encode(['success' => true]);
+            exit;
+        }
+    }
+    echo json_encode(['success' => false, 'error' => 'Invalid session or payload']);
+    exit;
+}
+
+// Handle Reset Preferences action
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reset_widget_preferences') {
+    validate_csrf();
+    $user_id = $_SESSION['user_id'] ?? null;
+    if ($user_id) {
+        $db = get_db_connection();
+        $stmt = $db->prepare("DELETE FROM user_widget_preferences WHERE user_id = ?");
+        $stmt->execute([$user_id]);
+        log_action('RESET_WIDGET_PREFERENCES', ['user_id' => $user_id]);
+        redirect('index.php');
+    }
+}
+
+// Render Core Dashboard Portal Screen
 require_once __DIR__ . '/header.php';
 
 $activePluginsList = $pluginManager->getActivePlugins();
 $activeCount = count($activePluginsList);
+$userId = $_SESSION['user_id'] ?? null;
 
 // Fetch current user details as dynamic widget context
 $currentUserContext = [
-    'id' => $_SESSION['user_id'] ?? null,
+    'id' => $userId,
     'username' => $_SESSION['user']['email'] ?? '',
     'display_name' => $_SESSION['user']['name'] ?? 'User',
     'roles' => isset($_SESSION['roles']) ? array_keys($_SESSION['roles']) : [],
     'permissions' => isset($_SESSION['permissions']) ? array_keys($_SESSION['permissions']) : []
 ];
+
+// Fetch saved widget preferences for current user
+$userWidgetPrefs = $userId ? get_user_widget_preferences($userId) : [];
+
+// Capture HTML rendered by plugins on 'index_dashboard_widgets' hook
+ob_start();
+$pluginManager->doAction('index_dashboard_widgets', $currentUserContext);
+$widgets_raw_html = ob_get_clean();
 ?>
 
-<div class="row mb-4">
-    <div class="col-md-8 text-start">
+<div class="row mb-4 align-items-center text-start">
+    <div class="col-md-7">
         <h1 class="h2"><i class="fa-solid fa-gauge-high text-primary me-2"></i>Core Dashboard</h1>
-        <p class="text-muted">Welcome to your Portal Homepage. Below are active dynamic widgets, diagnostic indicators, and audits.</p>
+        <p class="text-muted mb-0">Welcome to your Portal Homepage. Customize and reorder widgets to fit your workflow.</p>
     </div>
-    <div class="col-md-4 text-md-end align-self-center">
+    <div class="col-md-5 text-md-end mt-3 mt-md-0 d-flex justify-content-md-end align-items-center gap-2">
+        <button type="button" id="toggleCustomizeBtn" class="btn btn-sm btn-outline-primary" onclick="toggleWidgetCustomizeMode()">
+            <i class="fa-solid fa-sliders me-1"></i><span id="customizeBtnText">Customize Dashboard</span>
+        </button>
         <span class="badge bg-secondary p-2"><i class="fa-solid fa-clock me-1"></i> <?= date('Y-m-d H:i:s') ?></span>
     </div>
 </div>
 
+<!-- Customization Control Toolbar (Hidden by default) -->
+<div id="customizeToolbar" class="card shadow-sm border-primary mb-4 text-start d-none">
+    <div class="card-body bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h6 class="fw-bold mb-1 text-primary"><i class="fa-solid fa-sliders me-2"></i>Dashboard Layout Customizer</h6>
+            <small class="text-muted">Use controls on each widget to change width, reorder position, or hide/show cards. New widgets default to showing.</small>
+        </div>
+        <div class="d-flex gap-2">
+            <form method="POST" class="d-inline" onsubmit="return confirm('Reset dashboard layout to system default?');">
+                <?php csrf_field(); ?>
+                <input type="hidden" name="action" value="reset_widget_preferences">
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="fa-solid fa-rotate-left me-1"></i>Reset Defaults
+                </button>
+            </form>
+            <button type="button" class="btn btn-sm btn-success" onclick="saveWidgetPreferences()">
+                <i class="fa-solid fa-floppy-disk me-1"></i>Save Layout
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Extensible Dashboard Widget Hook (Per-User Contextual Widgets) -->
-<div class="row mb-4">
+<div class="row mb-4" id="dashboardWidgetsContainer">
     <?php
-    // Passes the contextual user session object so widgets draw customized, user-specific data
-    $pluginManager->doAction('index_dashboard_widgets', $currentUserContext);
+    // Parse raw widget blocks using DOMDocument / Regex parser to apply user preferences
+    if (!empty($widgets_raw_html)) {
+        // Find all widget blocks with class 'widget-block'
+        // If not explicit, wrap in DOM container
+        $dom = new DOMDocument();
+        // Suppress HTML5 parse warnings
+        libxml_use_internal_errors(true);
+        $dom->loadHTML('<?xml encoding="utf-8" ?>' . '<div id="widgets_root">' . $widgets_raw_html . '</div>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+
+        $xpath = new DOMXPath($dom);
+        $nodes = $xpath->query('//div[contains(concat(" ", normalize-space(@class), " "), " widget-block ")]');
+
+        $parsed_widgets = [];
+        $default_sort = 10;
+
+        if ($nodes->length > 0) {
+            foreach ($nodes as $index => $node) {
+                $w_key = $node->getAttribute('data-widget-key');
+                if (empty($w_key)) {
+                    $w_key = 'widget_' . ($index + 1);
+                    $node->setAttribute('data-widget-key', $w_key);
+                }
+
+                $w_title = $node->getAttribute('data-widget-title');
+                if (empty($w_title)) {
+                    $w_title = 'Dashboard Widget ' . ($index + 1);
+                }
+
+                // Check saved user preference for this widget
+                $pref = $userWidgetPrefs[$w_key] ?? null;
+
+                // NEW widgets NOT present in saved preferences default to visible (1) and col-12
+                $is_visible = $pref ? (int)$pref['is_visible'] : 1;
+                $width_class = $pref ? $pref['width_class'] : 'col-12';
+                $sort_order = $pref ? (int)$pref['sort_order'] : ($default_sort + ($index * 10));
+
+                $content_html = $dom->saveHTML($node);
+
+                $parsed_widgets[] = [
+                    'key' => $w_key,
+                    'title' => $w_title,
+                    'is_visible' => $is_visible,
+                    'width_class' => $width_class,
+                    'sort_order' => $sort_order,
+                    'html' => $content_html
+                ];
+            }
+
+            // Sort parsed widgets by sort_order ASC
+            usort($parsed_widgets, function($a, $b) {
+                return $a['sort_order'] <=> $b['sort_order'];
+            });
+
+            // Render ordered widgets
+            foreach ($parsed_widgets as $pw) {
+                $display_style = ($pw['is_visible'] === 0) ? 'display: none !important;' : '';
+                ?>
+                <div class="widget-item <?= htmlspecialchars($pw['width_class']) ?> mb-4"
+                     data-widget-key="<?= htmlspecialchars($pw['key']) ?>"
+                     data-widget-title="<?= htmlspecialchars($pw['title']) ?>"
+                     data-sort-order="<?= $pw['sort_order'] ?>"
+                     data-is-visible="<?= $pw['is_visible'] ?>"
+                     data-width-class="<?= htmlspecialchars($pw['width_class']) ?>"
+                     style="<?= $display_style ?>">
+
+                    <!-- Widget Customization Overlay Bar (Shown in Customize Mode) -->
+                    <div class="widget-custombar card mb-2 border-primary bg-dark text-white d-none">
+                        <div class="card-body p-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-primary"><i class="fa-solid fa-up-down-left-right me-1"></i><?= htmlspecialchars($pw['title']) ?></span>
+                                <span class="badge bg-secondary visibility-badge"><?= $pw['is_visible'] ? 'Visible' : 'Hidden' ?></span>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <label class="small me-1 text-light">Width:</label>
+                                <select class="form-select form-select-sm width-selector" style="width: 140px;" onchange="updateWidgetWidth(this)">
+                                    <option value="col-12" <?= $pw['width_class'] === 'col-12' ? 'selected' : '' ?>>Full Width (12/12)</option>
+                                    <option value="col-lg-8" <?= $pw['width_class'] === 'col-lg-8' ? 'selected' : '' ?>>2/3 Width (8/12)</option>
+                                    <option value="col-lg-6" <?= $pw['width_class'] === 'col-lg-6' ? 'selected' : '' ?>>1/2 Width (6/12)</option>
+                                    <option value="col-lg-4" <?= $pw['width_class'] === 'col-lg-4' ? 'selected' : '' ?>>1/3 Width (4/12)</option>
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-light visibility-toggle-btn" onclick="toggleWidgetVisibility(this)" title="Toggle Show/Hide">
+                                    <i class="fa-solid <?= $pw['is_visible'] ? 'fa-eye-slash text-warning' : 'fa-eye text-success' ?>"></i>
+                                    <span><?= $pw['is_visible'] ? 'Hide' : 'Show' ?></span>
+                                </button>
+                                <div class="btn-group btn-group-sm">
+                                    <button type="button" class="btn btn-outline-light" onclick="moveWidgetUp(this)" title="Move Up"><i class="fa-solid fa-arrow-up"></i></button>
+                                    <button type="button" class="btn btn-outline-light" onclick="moveWidgetDown(this)" title="Move Down"><i class="fa-solid fa-arrow-down"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="widget-inner-content">
+                        <?= $pw['html'] ?>
+                    </div>
+                </div>
+                <?php
+            }
+        } else {
+            // Fallback if no widget-block class wrapper was parsed
+            echo $widgets_raw_html;
+        }
+    }
     ?>
 </div>
 
@@ -115,5 +291,136 @@ $currentUserContext = [
         </div>
     </div>
 <?php endif; ?>
+
+<script>
+let customizeMode = false;
+
+function toggleWidgetCustomizeMode() {
+    customizeMode = !customizeMode;
+    const toolbar = document.getElementById('customizeToolbar');
+    const customBars = document.querySelectorAll('.widget-custombar');
+    const items = document.querySelectorAll('.widget-item');
+    const btnText = document.getElementById('customizeBtnText');
+
+    if (customizeMode) {
+        toolbar.classList.remove('d-none');
+        btnText.textContent = 'Exit Customizer Mode';
+        customBars.forEach(bar => bar.classList.remove('d-none'));
+
+        // Temporarily make hidden items semi-visible with opacity in customizer mode
+        items.forEach(item => {
+            if (item.getAttribute('data-is-visible') === '0') {
+                item.style.setProperty('display', 'block', 'important');
+                item.style.opacity = '0.5';
+            }
+        });
+    } else {
+        toolbar.classList.add('d-none');
+        btnText.textContent = 'Customize Dashboard';
+        customBars.forEach(bar => bar.classList.add('d-none'));
+
+        // Restore hidden status
+        items.forEach(item => {
+            if (item.getAttribute('data-is-visible') === '0') {
+                item.style.setProperty('display', 'none', 'important');
+                item.style.opacity = '1';
+            } else {
+                item.style.opacity = '1';
+            }
+        });
+    }
+}
+
+function updateWidgetWidth(selectElem) {
+    const item = selectElem.closest('.widget-item');
+    const newWidth = selectElem.value;
+
+    // Remove old col classes
+    item.classList.remove('col-12', 'col-lg-8', 'col-lg-6', 'col-lg-4');
+    item.classList.add(newWidth);
+    item.setAttribute('data-width-class', newWidth);
+}
+
+function toggleWidgetVisibility(btn) {
+    const item = btn.closest('.widget-item');
+    const currentVis = item.getAttribute('data-is-visible');
+    const badge = item.querySelector('.visibility-badge');
+    const icon = btn.querySelector('i');
+    const textSpan = btn.querySelector('span');
+
+    if (currentVis === '1') {
+        item.setAttribute('data-is-visible', '0');
+        badge.textContent = 'Hidden';
+        badge.className = 'badge bg-danger visibility-badge';
+        icon.className = 'fa-solid fa-eye text-success';
+        textSpan.textContent = 'Show';
+        if (customizeMode) {
+            item.style.opacity = '0.5';
+        }
+    } else {
+        item.setAttribute('data-is-visible', '1');
+        badge.textContent = 'Visible';
+        badge.className = 'badge bg-secondary visibility-badge';
+        icon.className = 'fa-solid fa-eye-slash text-warning';
+        textSpan.textContent = 'Hide';
+        item.style.opacity = '1';
+    }
+}
+
+function moveWidgetUp(btn) {
+    const item = btn.closest('.widget-item');
+    const prev = item.previousElementSibling;
+    if (prev && prev.classList.contains('widget-item')) {
+        item.parentNode.insertBefore(item, prev);
+    }
+}
+
+function moveWidgetDown(btn) {
+    const item = btn.closest('.widget-item');
+    const next = item.nextElementSibling;
+    if (next && next.classList.contains('widget-item')) {
+        item.parentNode.insertBefore(next, item);
+    }
+}
+
+function saveWidgetPreferences() {
+    const container = document.getElementById('dashboardWidgetsContainer');
+    const items = container.querySelectorAll('.widget-item');
+    const preferences = [];
+
+    items.forEach((item, index) => {
+        preferences.push({
+            widget_key: item.getAttribute('data-widget-key'),
+            is_visible: parseInt(item.getAttribute('data-is-visible') || '1'),
+            width_class: item.getAttribute('data-width-class') || 'col-12',
+            sort_order: (index + 1) * 10
+        });
+    });
+
+    const csrfToken = '<?= get_csrf_token() ?>';
+
+    const formData = new FormData();
+    formData.append('action', 'save_widget_preferences');
+    formData.append('csrf_token', csrfToken);
+    formData.append('preferences', JSON.stringify(preferences));
+
+    fetch('index.php', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Dashboard widget preferences saved successfully!');
+            window.location.reload();
+        } else {
+            alert('Failed to save preferences: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        alert('Error communicating with server: ' + err);
+    });
+}
+</script>
 
 <?php require_once __DIR__ . '/footer.php'; ?>
