@@ -485,10 +485,17 @@ class AzureADSSO
             if (empty($a)) continue;
 
             if (is_array($a)) {
-                $cardContent = $a;
+                // If array is a chat object returned by createChat (contains 'id' or 'chat_id' matching thread pattern)
+                if (isset($a['id']) && (str_contains($a['id'], '@thread.v2') || str_contains($a['id'], '19:'))) {
+                    $chatId = $a['id'];
+                } elseif (isset($a['chat_id']) && (str_contains($a['chat_id'], '@thread.v2') || str_contains($a['chat_id'], '19:'))) {
+                    $chatId = $a['chat_id'];
+                } else {
+                    $cardContent = $a;
+                }
             } elseif (is_string($a)) {
                 $str = trim($a);
-                if (str_starts_with($str, 'eyJ') || str_contains($str, '.') || strlen($str) > 150) {
+                if (str_starts_with($str, 'eyJ') || strlen($str) > 200) {
                     $accessToken = $str;
                 } elseif (str_contains($str, '@thread.v2') || str_contains($str, '19:')) {
                     $chatId = $str;
