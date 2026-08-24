@@ -98,6 +98,79 @@ class AzureADSSO
         return [];
     }
 
+    /**
+     * Retrieve members of a specific Azure AD group using Microsoft Graph API.
+     *
+     * @param string $groupId Group Object ID or Group Display Name
+     * @param string|null $accessToken Optional access token (if null, checks session locations or gets app token)
+     * @return array Array of user member objects
+     */
+    public function getGroupMembers($groupId, $accessToken = null)
+    {
+        if (empty($groupId)) {
+            return [];
+        }
+
+        // Mock / local fallback setup
+        if ($this->clientId === 'YOUR_AZURE_CLIENT_ID' || empty($this->clientSecret) || strpos($this->clientId, 'mock') !== false) {
+            return [
+                ['id' => 'user-1', 'displayName' => 'Admin User', 'userPrincipalName' => 'admin@example.com', 'mail' => 'admin@example.com'],
+                ['id' => 'user-2', 'displayName' => 'Manager User', 'userPrincipalName' => 'manager@example.com', 'mail' => 'manager@example.com']
+            ];
+        }
+
+        // Determine access token if not passed explicitly
+        if (empty($accessToken)) {
+            if (function_exists('get_azure_access_token')) {
+                $accessToken = get_azure_access_token();
+            } else {
+                $accessToken = $_SESSION['user']['access_token'] ?? $_SESSION['access_token'] ?? $_SESSION['azure_access_token'] ?? $_SESSION['tokens']['access_token'] ?? null;
+            }
+        }
+
+        // If no user access token found, acquire app-level token via Client Credentials Grant
+        if (empty($accessToken)) {
+            $tokenUrl = "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token";
+            $postFields = [
+                'grant_type'    => 'client_credentials',
+                'client_id'     => $this->clientId,
+                'client_secret' => $this->clientSecret,
+                'scope'         => 'https://graph.microsoft.com/.default'
+            ];
+            $tokenRes = $this->makePostRequest($tokenUrl, $postFields);
+            if ($tokenRes && !empty($tokenRes['access_token'])) {
+                $accessToken = $tokenRes['access_token'];
+            }
+        }
+
+        if (empty($accessToken)) {
+            return [];
+        }
+
+        $graphUrl = "https://graph.microsoft.com/v1.0/groups/" . urlencode($groupId) . "/members?\$select=id,displayName,userPrincipalName,mail";
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $graphUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $accessToken,
+            'Content-Type: application/json',
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode == 200) {
+            $data = json_decode($response, true);
+            if (isset($data['value'])) {
+                return $data['value'];
+            }
+        }
+
+        return [];
+    }
+
     public function getAllGroups()
     {
         // Fallback for mock/local setups without live Azure Tenant credentials
