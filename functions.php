@@ -25,6 +25,34 @@ function get_auth() {
 $pluginManager = PluginManager::getInstance();
 
 /* =========================================================
+ * AZURE AD / MS TEAMS OAUTH ACCESS TOKEN HELPER
+ * ========================================================= */
+
+/**
+ * Retrieve the active Microsoft Graph OAuth access token.
+ * Checks all 4 standard session token locations:
+ *  1. $_SESSION['user']['access_token']
+ *  2. $_SESSION['access_token']
+ *  3. $_SESSION['azure_access_token']
+ *  4. $_SESSION['tokens']['access_token']
+ */
+function get_azure_access_token() {
+    if (!empty($_SESSION['user']['access_token'])) {
+        return $_SESSION['user']['access_token'];
+    }
+    if (!empty($_SESSION['access_token'])) {
+        return $_SESSION['access_token'];
+    }
+    if (!empty($_SESSION['azure_access_token'])) {
+        return $_SESSION['azure_access_token'];
+    }
+    if (!empty($_SESSION['tokens']['access_token'])) {
+        return $_SESSION['tokens']['access_token'];
+    }
+    return null;
+}
+
+/* =========================================================
  * CORE HELPERS & PERMISSIONS
  * ========================================================= */
 
