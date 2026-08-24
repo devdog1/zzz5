@@ -78,6 +78,7 @@ class AzureADSSO
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
 
         if ($httpCode == 200) {
@@ -92,14 +93,17 @@ class AzureADSSO
                 }
             }
 
+            $this->logAzureAction('AZURE_GET_USER_GROUPS_SUCCESS', ['count' => count($groupNames), 'groups' => $groupNames]);
             return $groupNames;
         }
 
+        $this->logAzureAction('AZURE_GET_USER_GROUPS_ERROR', ['http_code' => $httpCode, 'response' => $response, 'curl_error' => $curlError]);
         return [];
     }
 
     /**
      * Retrieve members of a specific Azure AD group using Microsoft Graph API.
+     * Strictly queries live Graph API without mock fallbacks.
      *
      * @param string $groupId Group Object ID or Group Display Name
      * @param string|null $accessToken Optional access token (if null, checks session locations or gets app token)
@@ -108,15 +112,8 @@ class AzureADSSO
     public function getGroupMembers($groupId, $accessToken = null)
     {
         if (empty($groupId)) {
+            $this->logAzureAction('AZURE_GET_GROUP_MEMBERS_SKIPPED', ['reason' => 'Empty Group ID provided']);
             return [];
-        }
-
-        // Mock / local fallback setup
-        if ($this->clientId === 'YOUR_AZURE_CLIENT_ID' || empty($this->clientSecret) || strpos($this->clientId, 'mock') !== false) {
-            return [
-                ['id' => 'user-1', 'displayName' => 'Admin User', 'userPrincipalName' => 'admin@example.com', 'mail' => 'admin@example.com'],
-                ['id' => 'user-2', 'displayName' => 'Manager User', 'userPrincipalName' => 'manager@example.com', 'mail' => 'manager@example.com']
-            ];
         }
 
         // Determine access token if not passed explicitly
@@ -144,6 +141,7 @@ class AzureADSSO
         }
 
         if (empty($accessToken)) {
+            $this->logAzureAction('AZURE_GET_GROUP_MEMBERS_FAILED', ['group_id' => $groupId, 'reason' => 'No OAuth access token available']);
             return [];
         }
 
@@ -159,30 +157,24 @@ class AzureADSSO
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
 
         if ($httpCode == 200) {
             $data = json_decode($response, true);
             if (isset($data['value'])) {
-                return $data['value'];
+                $members = $data['value'];
+                $this->logAzureAction('AZURE_GET_GROUP_MEMBERS_SUCCESS', ['group_id' => $groupId, 'member_count' => count($members)]);
+                return $members;
             }
         }
 
+        $this->logAzureAction('AZURE_GET_GROUP_MEMBERS_ERROR', ['group_id' => $groupId, 'http_code' => $httpCode, 'response' => $response, 'curl_error' => $curlError]);
         return [];
     }
 
     public function getAllGroups()
     {
-        // Fallback for mock/local setups without live Azure Tenant credentials
-        if ($this->clientId === 'YOUR_AZURE_CLIENT_ID' || empty($this->clientSecret) || strpos($this->clientId, 'mock') !== false) {
-            return [
-                ['id' => '9f8e7d6c-5b4a-3f2e-1d0c-b9a8f7e6d5c4', 'displayName' => 'Portal-Administrators', 'description' => 'Global Portal Administrators Group'],
-                ['id' => '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d', 'displayName' => 'Portal-Managers', 'description' => 'Department Managers Group'],
-                ['id' => 'a1b2c3d4-e5f6-7a8b-9c0d-e1f2a3b4c5d6', 'displayName' => 'OnCall-Operators', 'description' => 'On-Call Roster Operators Group'],
-                ['id' => 'f9e8d7c6-b5a4-3f2e-1d0c-b9a8f7e6d5c4', 'displayName' => 'All-Employees', 'description' => 'General Employee Directory Group']
-            ];
-        }
-
         // Fetch app-only access token using Client Credentials Grant
         $tokenUrl = "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token";
         $postFields = [
@@ -194,6 +186,7 @@ class AzureADSSO
 
         $tokenRes = $this->makePostRequest($tokenUrl, $postFields);
         if (!$tokenRes || empty($tokenRes['access_token'])) {
+            $this->logAzureAction('AZURE_GET_ALL_GROUPS_TOKEN_FAILED', ['tenant_id' => $this->tenantId, 'client_id' => $this->clientId]);
             return [];
         }
 
@@ -210,15 +203,19 @@ class AzureADSSO
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
 
         if ($httpCode == 200) {
             $data = json_decode($response, true);
             if (isset($data['value'])) {
-                return $data['value'];
+                $groups = $data['value'];
+                $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($groups)]);
+                return $groups;
             }
         }
 
+        $this->logAzureAction('AZURE_GET_ALL_GROUPS_ERROR', ['http_code' => $httpCode, 'response' => $response, 'curl_error' => $curlError]);
         return [];
     }
 
@@ -236,12 +233,22 @@ class AzureADSSO
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
 
         if ($httpCode == 200) {
             return json_decode($response, true);
         }
 
+        $this->logAzureAction('AZURE_POST_REQUEST_ERROR', ['url' => $url, 'http_code' => $httpCode, 'response' => $response, 'curl_error' => $curlError]);
         return null;
+    }
+
+    private function logAzureAction($action, $details)
+    {
+        if (function_exists('log_action')) {
+            log_action($action, $details);
+        }
+        error_log("[AzureADSSO] {$action}: " . json_encode($details, JSON_UNESCAPED_SLASHES));
     }
 }
