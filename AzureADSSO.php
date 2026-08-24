@@ -605,6 +605,144 @@ class AzureADSSO
         return null;
     }
 
+    /**
+     * Add user member(s) to an existing Microsoft Teams chat conversation using Microsoft Graph API
+     * (POST /chats/{chatId}/members).
+     * Flexible argument handling supports various caller signatures:
+     *   - addMembersToChat($chatId, $members, $accessToken)
+     *   - addMembersToChat($accessToken, $chatId, $members)
+     *   - addMembersToChat($chatId, $accessToken, $members)
+     *
+     * @param mixed $arg1 Chat ID, Members list, or Access Token
+     * @param mixed $arg2 Chat ID, Members list, or Access Token
+     * @param mixed $arg3 Chat ID, Members list, or Access Token
+     * @return array|null Added member object(s) or response payload returned by Graph API
+     */
+    public function addMembersToChat($arg1 = null, $arg2 = null, $arg3 = null)
+    {
+        $chatId = null;
+        $membersInput = [];
+        $accessToken = null;
+
+        // Inspect all 3 arguments to classify them
+        $args = [$arg1, $arg2, $arg3];
+
+        foreach ($args as $a) {
+            if (empty($a)) continue;
+
+            if (is_array($a)) {
+                // If array is a chat object (contains 'id' or 'chat_id' matching thread pattern)
+                if (isset($a['id']) && (str_contains($a['id'], '@thread.v2') || str_contains($a['id'], '19:'))) {
+                    $chatId = $a['id'];
+                } elseif (isset($a['chat_id']) && (str_contains($a['chat_id'], '@thread.v2') || str_contains($a['chat_id'], '19:'))) {
+                    $chatId = $a['chat_id'];
+                } else {
+                    $membersInput = $a;
+                }
+            } elseif (is_string($a)) {
+                $str = trim($a);
+                if (str_starts_with($str, 'eyJ') || strlen($str) > 200) {
+                    $accessToken = $str;
+                } elseif (str_contains($str, '@thread.v2') || str_contains($str, '19:')) {
+                    $chatId = $str;
+                } else {
+                    if (empty($chatId)) {
+                        $chatId = $str;
+                    } else {
+                        $membersInput[] = $str;
+                    }
+                }
+            }
+        }
+
+        // Determine access token if not explicitly supplied
+        if (empty($accessToken)) {
+            if (function_exists('get_azure_access_token')) {
+                $accessToken = get_azure_access_token();
+            } else {
+                $accessToken = $_SESSION['user']['access_token'] ?? $_SESSION['access_token'] ?? $_SESSION['azure_access_token'] ?? $_SESSION['tokens']['access_token'] ?? null;
+            }
+        }
+
+        if (empty($chatId)) {
+            $this->logAzureAction('AZURE_ADD_MEMBERS_TO_CHAT_FAILED', ['reason' => 'Empty Chat ID provided']);
+            return null;
+        }
+
+        if (empty($accessToken)) {
+            $this->logAzureAction('AZURE_ADD_MEMBERS_TO_CHAT_FAILED', ['chat_id' => $chatId, 'reason' => 'No OAuth access token available']);
+            return null;
+        }
+
+        // Process each member individually or as batch payload
+        $results = [];
+        $graphUrl = "https://graph.microsoft.com/v1.0/chats/" . urlencode($chatId) . "/members";
+
+        foreach ($membersInput as $m) {
+            $userId = null;
+            if (is_array($m)) {
+                $userId = !empty($m['id']) ? $m['id'] : (!empty($m['userPrincipalName']) ? $m['userPrincipalName'] : (!empty($m['mail']) ? $m['mail'] : ($m['user_id'] ?? null)));
+            } elseif (is_string($m)) {
+                $userId = trim($m);
+            }
+
+            if (!empty($userId)) {
+                $isGuid = preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $userId);
+                $isEmail = str_contains($userId, '@');
+
+                if ($isGuid || $isEmail) {
+                    $userBindUrl = $isGuid
+                        ? "https://graph.microsoft.com/v1.0/users('{$userId}')"
+                        : "https://graph.microsoft.com/v1.0/users('" . urlencode($userId) . "')";
+
+                    $memberPayload = [
+                        '@odata.type' => '#microsoft.graph.aadUserConversationMember',
+                        'roles' => ['owner'],
+                        'user@odata.bind' => $userBindUrl
+                    ];
+
+                    $jsonPayload = json_encode($memberPayload, JSON_UNESCAPED_SLASHES);
+
+                    $ch = curl_init();
+                    curl_setopt($ch, CURLOPT_URL, $graphUrl);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                        'Authorization: Bearer ' . $accessToken,
+                        'Content-Type: application/json',
+                    ]);
+
+                    $response = curl_exec($ch);
+                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $curlError = curl_error($ch);
+                    curl_close($ch);
+
+                    if ($httpCode == 201 || $httpCode == 200) {
+                        $resData = json_decode($response, true);
+                        $results[] = $resData;
+                        $this->logAzureAction('AZURE_ADD_MEMBER_TO_CHAT_SUCCESS', [
+                            'chat_id' => $chatId,
+                            'user_id' => $userId,
+                            'member_id' => $resData['id'] ?? null
+                        ]);
+                    } else {
+                        $this->logAzureAction('AZURE_ADD_MEMBER_TO_CHAT_ERROR', [
+                            'chat_id' => $chatId,
+                            'user_id' => $userId,
+                            'http_code' => $httpCode,
+                            'request_payload_json' => $jsonPayload,
+                            'response' => $response,
+                            'curl_error' => $curlError
+                        ]);
+                    }
+                }
+            }
+        }
+
+        return !empty($results) ? $results : null;
+    }
+
     private function makePostRequest($url, $postFields)
     {
         $ch = curl_init();
