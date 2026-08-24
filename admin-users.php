@@ -168,15 +168,19 @@ require_once __DIR__ . '/header.php';
     <!-- Users List & Permissions Configuration -->
     <div class="col-lg-8">
         <div class="card shadow-sm mb-4">
-            <div class="card-header bg-dark text-white">
-                <i class="fa-solid fa-list-check me-2"></i>Portal User Directory & Privileges
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="fa-solid fa-list-check me-2"></i>Portal User Directory & Privileges</span>
+                <div class="input-group input-group-sm" style="max-width: 280px;">
+                    <span class="input-group-text bg-secondary text-white border-secondary"><i class="fa-solid fa-magnifying-glass"></i></span>
+                    <input type="text" id="userSearchInput" class="form-control" placeholder="Search user, email, role..." onkeyup="filterUsersTable()">
+                </div>
             </div>
             <div class="card-body p-0">
                 <?php if (empty($users)): ?>
                     <p class="text-muted p-4 mb-0">No users found in database.</p>
                 <?php else: ?>
                     <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
+                        <table class="table table-hover align-middle mb-0" id="userDirectoryTable">
                             <thead class="table-light">
                                 <tr>
                                     <th>User Information</th>
@@ -434,5 +438,29 @@ require_once __DIR__ . '/header.php';
         </div>
     </div>
 </div>
+
+<script>
+function filterUsersTable() {
+    const input = document.getElementById('userSearchInput');
+    const filter = input.value.toLowerCase();
+    const table = document.getElementById('userDirectoryTable');
+    if (!table) return;
+
+    const rows = table.getElementsByTagName('tr');
+
+    // Skip row 0 (thead)
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row.getElementsByTagName('td').length) continue;
+
+        const text = row.textContent || row.innerText;
+        if (text.toLowerCase().indexOf(filter) > -1) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    }
+}
+</script>
 
 <?php require_once __DIR__ . '/footer.php'; ?>
