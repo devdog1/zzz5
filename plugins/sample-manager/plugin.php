@@ -63,7 +63,7 @@ PluginManager::getInstance()->registerService(
 PluginManager::getInstance()->addAction('index_dashboard_widgets', function($userContext) {
     $roles_str = implode(', ', array_map('ucfirst', $userContext['roles'] ?? []));
     ?>
-    <div class="col-md-6 col-lg-4">
+    <div class="col-12 col-md-6 col-lg-4 widget-block" data-widget-key="sample_user_context_widget" data-widget-title="User Context Widget">
         <div class="card bg-gradient shadow-sm border-start border-5 border-info text-start">
             <div class="card-body">
                 <div class="d-flex align-items-center">

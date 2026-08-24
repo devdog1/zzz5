@@ -135,73 +135,77 @@ $widgets_raw_html = ob_get_clean();
         $parsed_widgets = [];
         $default_sort = 10;
 
-        // Search for all <div ... class="... widget-block ..." ...> occurrences
+        // Iterate through all top-level <div ...> blocks outputted by any enabled plugin
         $offset = 0;
         $index = 0;
+        $len = strlen($widgets_raw_html);
 
-        while (($pos = preg_match('/<div[^>]*class=["\'][^"\']*widget-block[^"\']*["\'][^>]*>/i', $widgets_raw_html, $matches, PREG_OFFSET_CAPTURE, $offset)) !== false && !empty($matches)) {
-            $tag_str = $matches[0][0];
-            $start_index = $matches[0][1];
+        while ($offset < $len) {
+            if (preg_match('/<div\b[^>]*>/i', $widgets_raw_html, $matches, PREG_OFFSET_CAPTURE, $offset) === 1) {
+                $tag_str = $matches[0][0];
+                $start_index = $matches[0][1];
 
-            // Extract data-widget-key
-            $w_key = '';
-            if (preg_match('/data-widget-key=["\']([^"\']+)["\']/i', $tag_str, $km)) {
-                $w_key = $km[1];
-            } else {
-                $w_key = 'widget_' . ($index + 1);
-            }
-
-            // Extract data-widget-title
-            $w_title = '';
-            if (preg_match('/data-widget-title=["\']([^"\']+)["\']/i', $tag_str, $tm)) {
-                $w_title = $tm[1];
-            } else {
-                $w_title = 'Dashboard Widget ' . ($index + 1);
-            }
-
-            // Find matching closing </div> by tracking nested <div> tag depth
-            $len = strlen($widgets_raw_html);
-            $depth = 1;
-            $i = $start_index + strlen($tag_str);
-            $end_index = $len;
-
-            while ($i < $len) {
-                if (substr($widgets_raw_html, $i, 4) === '<div') {
-                    $depth++;
-                    $i += 4;
-                } elseif (substr($widgets_raw_html, $i, 6) === '</div>') {
-                    $depth--;
-                    if ($depth === 0) {
-                        $end_index = $i + 6;
-                        break;
-                    }
-                    $i += 6;
+                // Extract or generate data-widget-key
+                $w_key = '';
+                if (preg_match('/data-widget-key=["\']([^"\']+)["\']/i', $tag_str, $km)) {
+                    $w_key = $km[1];
                 } else {
-                    $i++;
+                    $w_key = 'widget_' . ($index + 1);
                 }
+
+                // Extract or generate data-widget-title
+                $w_title = '';
+                if (preg_match('/data-widget-title=["\']([^"\']+)["\']/i', $tag_str, $tm)) {
+                    $w_title = $tm[1];
+                } else {
+                    $w_title = 'Dashboard Widget ' . ($index + 1);
+                }
+
+                // Find matching closing </div> by tracking nested <div> tag depth
+                $depth = 1;
+                $i = $start_index + strlen($tag_str);
+                $end_index = $len;
+
+                while ($i < $len) {
+                    if (substr($widgets_raw_html, $i, 4) === '<div') {
+                        $depth++;
+                        $i += 4;
+                    } elseif (substr($widgets_raw_html, $i, 6) === '</div>') {
+                        $depth--;
+                        if ($depth === 0) {
+                            $end_index = $i + 6;
+                            break;
+                        }
+                        $i += 6;
+                    } else {
+                        $i++;
+                    }
+                }
+
+                $widget_html = substr($widgets_raw_html, $start_index, $end_index - $start_index);
+
+                // Check saved user preference for this widget
+                $pref = $userWidgetPrefs[$w_key] ?? null;
+
+                // NEW widgets NOT present in saved preferences default to visible (1) and col-12
+                $is_visible = $pref ? (int)$pref['is_visible'] : 1;
+                $width_class = $pref ? $pref['width_class'] : 'col-12';
+                $sort_order = $pref ? (int)$pref['sort_order'] : ($default_sort + ($index * 10));
+
+                $parsed_widgets[] = [
+                    'key' => $w_key,
+                    'title' => $w_title,
+                    'is_visible' => $is_visible,
+                    'width_class' => $width_class,
+                    'sort_order' => $sort_order,
+                    'html' => $widget_html
+                ];
+
+                $offset = $end_index;
+                $index++;
+            } else {
+                break;
             }
-
-            $widget_html = substr($widgets_raw_html, $start_index, $end_index - $start_index);
-
-            // Check saved user preference for this widget
-            $pref = $userWidgetPrefs[$w_key] ?? null;
-
-            // NEW widgets NOT present in saved preferences default to visible (1) and col-12
-            $is_visible = $pref ? (int)$pref['is_visible'] : 1;
-            $width_class = $pref ? $pref['width_class'] : 'col-12';
-            $sort_order = $pref ? (int)$pref['sort_order'] : ($default_sort + ($index * 10));
-
-            $parsed_widgets[] = [
-                'key' => $w_key,
-                'title' => $w_title,
-                'is_visible' => $is_visible,
-                'width_class' => $width_class,
-                'sort_order' => $sort_order,
-                'html' => $widget_html
-            ];
-
-            $offset = $end_index;
-            $index++;
         }
 
         if (!empty($parsed_widgets)) {
