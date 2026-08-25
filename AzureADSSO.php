@@ -250,9 +250,14 @@ class AzureADSSO
         return [];
     }
 
+    /**
+     * Retrieve all groups in the Microsoft Active Directory tenant, supporting @odata.nextLink pagination.
+     *
+     * @return array Array of group objects with id, displayName, and description
+     */
     public function getAllGroups()
     {
-        // 1. First try using user's delegated OAuth access token (which contains user delegated Group.Read.All scope)
+        // Determine user delegated access token
         $userAccessToken = null;
         if (function_exists('get_azure_access_token')) {
             $userAccessToken = get_azure_access_token();
@@ -260,36 +265,54 @@ class AzureADSSO
             $userAccessToken = $_SESSION['user']['access_token'] ?? $_SESSION['access_token'] ?? $_SESSION['azure_access_token'] ?? $_SESSION['tokens']['access_token'] ?? null;
         }
 
-        $queryGroups = function($token) {
-            $graphUrl = "https://graph.microsoft.com/v1.0/groups?\$select=id,displayName,description";
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $graphUrl);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Authorization: Bearer ' . $token,
-                'Content-Type: application/json',
-            ]);
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
-            curl_close($ch);
-            return ['code' => $httpCode, 'response' => $response, 'error' => $curlError];
+        // Closure to fetch all pages of groups using @odata.nextLink
+        $fetchAllPages = function($token) {
+            $allGroups = [];
+            $nextUrl = "https://graph.microsoft.com/v1.0/groups?\$select=id,displayName,description&\$top=999";
+            $pageCount = 0;
+
+            while (!empty($nextUrl) && $pageCount < 50) { // Safety cap of 50 pages (up to ~50,000 groups)
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, $nextUrl);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    'Authorization: Bearer ' . $token,
+                    'Content-Type: application/json',
+                ]);
+                $response = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $curlError = curl_error($ch);
+                curl_close($ch);
+
+                if ($httpCode != 200) {
+                    return ['success' => false, 'code' => $httpCode, 'response' => $response, 'error' => $curlError, 'groups' => $allGroups];
+                }
+
+                $data = json_decode($response, true);
+                if (isset($data['value']) && is_array($data['value'])) {
+                    $allGroups = array_merge($allGroups, $data['value']);
+                }
+
+                // Check for Microsoft Graph @odata.nextLink pagination URL
+                $nextUrl = $data['@odata.nextLink'] ?? null;
+                $pageCount++;
+            }
+
+            return ['success' => true, 'code' => 200, 'groups' => $allGroups];
         };
 
+        // 1. First try using user's delegated OAuth access token
         if (!empty($userAccessToken)) {
-            $res = $queryGroups($userAccessToken);
-            if ($res['code'] == 200) {
-                $data = json_decode($res['response'], true);
-                if (isset($data['value'])) {
-                    $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($data['value']), 'token_type' => 'delegated_user_token']);
-                    return $data['value'];
-                }
+            $res = $fetchAllPages($userAccessToken);
+            if ($res['success']) {
+                $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($res['groups']), 'token_type' => 'delegated_user_token']);
+                return $res['groups'];
             } else {
                 $this->logAzureAction('AZURE_GET_ALL_GROUPS_DELEGATED_FAILED', ['http_code' => $res['code'], 'response' => $res['response']]);
             }
         }
 
-        // 2. Fall back to app Client Credentials Token
+        // 2. Fall back to App Client Credentials Token
         $tokenUrl = "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token";
         $postFields = [
             'grant_type'    => 'client_credentials',
@@ -301,13 +324,10 @@ class AzureADSSO
         $tokenRes = $this->makePostRequest($tokenUrl, $postFields);
         if ($tokenRes && !empty($tokenRes['access_token'])) {
             $appAccessToken = $tokenRes['access_token'];
-            $res = $queryGroups($appAccessToken);
-            if ($res['code'] == 200) {
-                $data = json_decode($res['response'], true);
-                if (isset($data['value'])) {
-                    $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($data['value']), 'token_type' => 'app_client_credentials']);
-                    return $data['value'];
-                }
+            $res = $fetchAllPages($appAccessToken);
+            if ($res['success']) {
+                $this->logAzureAction('AZURE_GET_ALL_GROUPS_SUCCESS', ['group_count' => count($res['groups']), 'token_type' => 'app_client_credentials']);
+                return $res['groups'];
             } else {
                 $this->logAzureAction('AZURE_GET_ALL_GROUPS_ERROR', ['http_code' => $res['code'], 'response' => $res['response'], 'curl_error' => $res['error']]);
             }
