@@ -137,8 +137,24 @@ function csrf_verify() {
 }
 
 /* =========================================================
- * SYSTEM SETTINGS API
+ * SYSTEM & PLUGIN SETTINGS API
  * ========================================================= */
+
+/**
+ * Retrieve a plugin-specific setting value with key prefix isolation.
+ */
+function get_plugin_setting($plugin_slug, $key, $default = null) {
+    $prefixed_key = 'plug_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $plugin_slug) . '_' . $key;
+    return get_setting($prefixed_key, $default);
+}
+
+/**
+ * Save or update a plugin-specific setting value.
+ */
+function set_plugin_setting($plugin_slug, $key, $value) {
+    $prefixed_key = 'plug_' . preg_replace('/[^a-zA-Z0-9_]/', '_', $plugin_slug) . '_' . $key;
+    return set_setting($prefixed_key, $value);
+}
 
 function get_setting($key, $default = null) {
     try {
@@ -287,6 +303,47 @@ function get_user_by_id($id) {
         return null;
     }
 }
+
+/* =========================================================
+ * CORE FRAMEWORK ROUTES & HEALTH CHECK ENDPOINT
+ * ========================================================= */
+
+add_action('register_routes', function() {
+    // Health Check Endpoint (returns JSON platform metrics)
+    register_route('health_check', function() {
+        header('Content-Type: application/json');
+
+        $db_ok = false;
+        $db_error = null;
+        try {
+            $db = get_db_connection();
+            $db->query("SELECT 1");
+            $db_ok = true;
+        } catch (Exception $e) {
+            $db_error = $e->getMessage();
+        }
+
+        $active_plugins = PluginManager::getInstance()->getActivePlugins();
+        $registered_tasks = Scheduler::getInstance()->getRegisteredTasks();
+
+        $metrics = [
+            'status' => $db_ok ? 'healthy' : 'unhealthy',
+            'timestamp' => date('c'),
+            'php_version' => PHP_VERSION,
+            'site_name' => get_setting('site_name', 'Framework Portal'),
+            'database' => [
+                'status' => $db_ok ? 'connected' : 'error',
+                'error' => $db_error
+            ],
+            'active_plugins_count' => count($active_plugins),
+            'active_plugins' => array_values($active_plugins),
+            'registered_tasks_count' => count($registered_tasks)
+        ];
+
+        echo json_encode($metrics, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit;
+    });
+});
 
 /* =========================================================
  * BOOTSTRAP HOOKS / PLUGINS SYSTEM

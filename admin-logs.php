@@ -42,6 +42,39 @@ if (!empty($conditions)) {
     $sql .= " WHERE " . implode(" AND ", $conditions);
 }
 
+// Handle CSV Export
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    $export_sql = $sql . " ORDER BY al.timestamp {$sort_order}";
+    try {
+        $stmt = $db->prepare($export_sql);
+        $stmt->execute($params);
+        $export_logs = $stmt->fetchAll();
+
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="audit_logs_' . date('Ymd_His') . '.csv"');
+
+        $output = fopen('php://output', 'w');
+        fputcsv($output, ['ID', 'Timestamp', 'Action', 'User ID', 'Username', 'Display Name', 'IP Address', 'Details']);
+
+        foreach ($export_logs as $row) {
+            fputcsv($output, [
+                $row['id'],
+                $row['timestamp'],
+                $row['action'],
+                $row['user_id'],
+                $row['username'],
+                $row['display_name'],
+                $row['ip_address'],
+                $row['details']
+            ]);
+        }
+        fclose($output);
+        exit;
+    } catch (Exception $e) {
+        // Fallback if export fails
+    }
+}
+
 $sql .= " ORDER BY al.timestamp {$sort_order} LIMIT 100";
 
 try {
@@ -86,7 +119,13 @@ require_once __DIR__ . '/header.php';
                 </select>
             </div>
             <div class="col-12 text-end">
+                <?php
+                $export_query = $_GET;
+                $export_query['export'] = 'csv';
+                $export_url = 'admin-logs.php?' . http_build_query($export_query);
+                ?>
                 <a href="admin-logs.php" class="btn btn-sm btn-outline-secondary me-2"><i class="fa-solid fa-arrows-rotate me-1"></i>Reset Filter</a>
+                <a href="<?= htmlspecialchars($export_url) ?>" class="btn btn-sm btn-outline-success me-2"><i class="fa-solid fa-file-csv me-1"></i>Export to CSV</a>
                 <button type="submit" class="btn btn-sm btn-primary"><i class="fa-solid fa-magnifying-glass me-1"></i>Apply Filters</button>
             </div>
         </form>

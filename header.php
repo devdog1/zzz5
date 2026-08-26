@@ -235,3 +235,17 @@ $site_name = get_setting('site_name', 'Framework Portal');
 </nav>
 
 <div class="container pb-5">
+
+<?php
+// Render Site-Wide Broadcast Announcement Banner if enabled
+if (get_setting('broadcast_banner_enabled', '0') === '1') {
+    $banner_msg = get_setting('broadcast_banner_message', '');
+    $banner_type = htmlspecialchars(get_setting('broadcast_banner_type', 'info'));
+    if (!empty($banner_msg)) {
+        echo '<div class="alert alert-' . $banner_type . ' alert-dismissible fade show mb-4 text-start shadow-sm fw-semibold" role="alert">';
+        echo '<i class="fa-solid fa-bullhorn me-2"></i>' . $banner_msg;
+        echo '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+        echo '</div>';
+    }
+}
+?>
