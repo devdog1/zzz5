@@ -68,6 +68,47 @@ function require_login() {
     get_auth()->requireLogin();
 }
 
+/**
+ * Return the logged-in user profile array from session, or null if unauthenticated.
+ */
+function current_user() {
+    return $_SESSION['user'] ?? null;
+}
+
+/**
+ * Safely escape strings for HTML output to prevent XSS.
+ */
+function e($string) {
+    return htmlspecialchars((string)($string ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * Set a flash message to display to the user on the next page load.
+ *
+ * @param string $type Message category (success, danger, warning, info)
+ * @param string $message The message body
+ */
+function set_flash_message($type, $message) {
+    if (!isset($_SESSION['flash_messages'])) {
+        $_SESSION['flash_messages'] = [];
+    }
+    $_SESSION['flash_messages'][] = [
+        'type' => $type,
+        'message' => $message
+    ];
+}
+
+/**
+ * Retrieve and consume all pending flash messages from session.
+ *
+ * @return array List of flash message arrays [['type' => ..., 'message' => ...]]
+ */
+function get_flash_messages() {
+    $messages = $_SESSION['flash_messages'] ?? [];
+    unset($_SESSION['flash_messages']);
+    return $messages;
+}
+
 /* =========================================================
  * PLUGIN & HOOK HELPER WRAPPERS
  * ========================================================= */
