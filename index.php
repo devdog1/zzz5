@@ -54,6 +54,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// Handle POST AJAX action to save system default dashboard layout (Admin only)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_default_widget_preferences') {
+    validate_csrf();
+    if (has_permission('manage_settings') || has_permission('manage_plugins')) {
+        $prefs_json = $_POST['preferences'] ?? '[]';
+        $prefs = json_decode($prefs_json, true);
+        if (is_array($prefs)) {
+            $formatted_defaults = [];
+            foreach ($prefs as $index => $item) {
+                $widget_key = trim($item['widget_key'] ?? '');
+                if (!empty($widget_key)) {
+                    $formatted_defaults[$widget_key] = [
+                        'widget_key' => $widget_key,
+                        'is_visible' => !empty($item['is_visible']) ? 1 : 0,
+                        'width_class' => trim($item['width_class'] ?? 'col-12'),
+                        'sort_order' => (int)($item['sort_order'] ?? (($index + 1) * 10))
+                    ];
+                }
+            }
+            set_setting('default_dashboard_layout', json_encode($formatted_defaults));
+            log_action('SAVE_DEFAULT_DASHBOARD_LAYOUT', ['admin_user_id' => $_SESSION['user_id'] ?? null]);
+            echo json_encode(['success' => true]);
+            exit;
+        }
+    }
+    echo json_encode(['success' => false, 'error' => 'Permission denied or invalid payload']);
+    exit;
+}
+
 // Handle Reset Preferences action
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reset_widget_preferences') {
     validate_csrf();
@@ -85,6 +114,12 @@ $currentUserContext = [
 
 // Fetch saved widget preferences for current user
 $userWidgetPrefs = $userId ? get_user_widget_preferences($userId) : [];
+
+// If user has no personal widget preferences saved, fallback to system default layout if set
+if (empty($userWidgetPrefs)) {
+    $defaultLayoutJson = get_setting('default_dashboard_layout', '{}');
+    $userWidgetPrefs = json_decode($defaultLayoutJson, true) ?: [];
+}
 
 // Capture HTML rendered by plugins on 'index_dashboard_widgets' hook
 ob_start();
@@ -120,8 +155,13 @@ $widgets_raw_html = ob_get_clean();
                     <i class="fa-solid fa-rotate-left me-1"></i>Reset Defaults
                 </button>
             </form>
-            <button type="button" class="btn btn-sm btn-success" onclick="saveWidgetPreferences()">
-                <i class="fa-solid fa-floppy-disk me-1"></i>Save Layout
+            <?php if (has_permission('manage_settings') || has_permission('manage_plugins')): ?>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="saveWidgetPreferences('save_default_widget_preferences')">
+                    <i class="fa-solid fa-sliders me-1"></i>Save as System Default
+                </button>
+            <?php endif; ?>
+            <button type="button" class="btn btn-sm btn-success" onclick="saveWidgetPreferences('save_widget_preferences')">
+                <i class="fa-solid fa-floppy-disk me-1"></i>Save My Layout
             </button>
         </div>
     </div>
@@ -426,7 +466,7 @@ function moveWidgetDown(btn) {
     }
 }
 
-function saveWidgetPreferences() {
+function saveWidgetPreferences(actionType = 'save_widget_preferences') {
     const container = document.getElementById('dashboardWidgetsContainer');
     const items = container.querySelectorAll('.widget-item');
     const preferences = [];
@@ -443,7 +483,7 @@ function saveWidgetPreferences() {
     const csrfToken = '<?= get_csrf_token() ?>';
 
     const formData = new FormData();
-    formData.append('action', 'save_widget_preferences');
+    formData.append('action', actionType);
     formData.append('csrf_token', csrfToken);
     formData.append('preferences', JSON.stringify(preferences));
 
@@ -454,7 +494,10 @@ function saveWidgetPreferences() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Dashboard widget preferences saved successfully!');
+            const msg = (actionType === 'save_default_widget_preferences')
+                ? 'System default dashboard layout saved successfully!'
+                : 'Your personal dashboard layout saved successfully!';
+            alert(msg);
             window.location.reload();
         } else {
             alert('Failed to save preferences: ' + (data.error || 'Unknown error'));
