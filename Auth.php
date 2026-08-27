@@ -61,6 +61,7 @@ class Auth
         $userId = $this->syncUser($azureOid, $email, $name);
 
         $accessToken = $tokens['access_token'] ?? '';
+        $refreshToken = $tokens['refresh_token'] ?? null;
 
         $_SESSION['user_id'] = $userId;
         $_SESSION['user'] = [
@@ -68,16 +69,23 @@ class Auth
             'email'     => $email,
             'name'      => $name,
             'groups'    => $groups,
-            'access_token' => $accessToken
+            'access_token' => $accessToken,
+            'refresh_token' => $refreshToken
         ];
 
-        // Populate access_token across all 4 standard session locations for plugin / MS Teams compatibility
+        // Populate access_token and refresh_token across standard session locations for plugin / MS Teams compatibility
         $_SESSION['access_token'] = $accessToken;
         $_SESSION['azure_access_token'] = $accessToken;
+        if ($refreshToken) {
+            $_SESSION['refresh_token'] = $refreshToken;
+        }
         if (!isset($_SESSION['tokens']) || !is_array($_SESSION['tokens'])) {
             $_SESSION['tokens'] = [];
         }
         $_SESSION['tokens']['access_token'] = $accessToken;
+        if ($refreshToken) {
+            $_SESSION['tokens']['refresh_token'] = $refreshToken;
+        }
 
         $_SESSION['roles'] = $this->getRoles($userId, $groups);
         $_SESSION['permissions'] = $this->getPermissions($userId, $groups);

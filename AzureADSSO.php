@@ -52,6 +52,97 @@ class AzureADSSO
         return $this->makePostRequest($this->tokenUrl, $postFields);
     }
 
+    /**
+     * Renew access token using an OAuth refresh token.
+     *
+     * @param string $refreshToken
+     * @return array|null Token response payload
+     */
+    public function refreshAccessToken($refreshToken)
+    {
+        $postFields = [
+            'grant_type'    => 'refresh_token',
+            'client_id'     => $this->clientId,
+            'client_secret' => $this->clientSecret,
+            'refresh_token' => $refreshToken,
+            'scope'         => $this->scopes,
+        ];
+
+        return $this->makePostRequest($this->tokenUrl, $postFields);
+    }
+
+    /**
+     * Acquire a fresh access token by using the stored refresh token or falling back to App Client Credentials.
+     * Automatically updates session token states if a new user token is acquired.
+     *
+     * @return string|null New OAuth access token
+     */
+    public function acquireFreshToken()
+    {
+        $refreshToken = $_SESSION['user']['refresh_token'] ?? $_SESSION['refresh_token'] ?? $_SESSION['tokens']['refresh_token'] ?? null;
+
+        if (!empty($refreshToken)) {
+            $tokens = $this->refreshAccessToken($refreshToken);
+            if ($tokens && !empty($tokens['access_token'])) {
+                $newAccessToken = $tokens['access_token'];
+                $newRefreshToken = $tokens['refresh_token'] ?? $refreshToken;
+                $this->updateSessionToken($newAccessToken, $newRefreshToken);
+                $this->logAzureAction('AZURE_TOKEN_REFRESH_SUCCESS', [
+                    'reason' => 'Successfully renewed access token using refresh_token'
+                ]);
+                return $newAccessToken;
+            }
+        }
+
+        // Fallback: App Client Credentials token
+        $tokenUrl = "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token";
+        $postFields = [
+            'grant_type'    => 'client_credentials',
+            'client_id'     => $this->clientId,
+            'client_secret' => $this->clientSecret,
+            'scope'         => 'https://graph.microsoft.com/.default'
+        ];
+
+        $tokenRes = $this->makePostRequest($tokenUrl, $postFields);
+        if ($tokenRes && !empty($tokenRes['access_token'])) {
+            $appToken = $tokenRes['access_token'];
+            $this->logAzureAction('AZURE_APP_TOKEN_ACQUIRED', [
+                'reason' => 'Acquired client credentials app token after refresh token unavailable/expired'
+            ]);
+            return $appToken;
+        }
+
+        return null;
+    }
+
+    /**
+     * Synchronize newly acquired OAuth tokens across all standard session keys.
+     *
+     * @param string $accessToken
+     * @param string|null $refreshToken
+     */
+    public function updateSessionToken($accessToken, $refreshToken = null)
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        if (isset($_SESSION['user']) && is_array($_SESSION['user'])) {
+            $_SESSION['user']['access_token'] = $accessToken;
+            if ($refreshToken) $_SESSION['user']['refresh_token'] = $refreshToken;
+        }
+
+        $_SESSION['access_token'] = $accessToken;
+        $_SESSION['azure_access_token'] = $accessToken;
+        if ($refreshToken) $_SESSION['refresh_token'] = $refreshToken;
+
+        if (!isset($_SESSION['tokens']) || !is_array($_SESSION['tokens'])) {
+            $_SESSION['tokens'] = [];
+        }
+        $_SESSION['tokens']['access_token'] = $accessToken;
+        if ($refreshToken) $_SESSION['tokens']['refresh_token'] = $refreshToken;
+    }
+
     public function getUserInfo($idToken)
     {
         list($header, $payload, $signature) = explode(".", $idToken);
@@ -589,23 +680,40 @@ class AzureADSSO
         $graphUrl = "https://graph.microsoft.com/v1.0/chats/" . urlencode($chatId) . "/messages";
         $jsonPayload = json_encode($messagePayload, JSON_UNESCAPED_SLASHES);
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $graphUrl);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Authorization: Bearer ' . $accessToken,
-            'Content-Type: application/json',
-        ]);
+        $executeSendMessage = function($token) use ($graphUrl, $jsonPayload) {
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $graphUrl);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json',
+            ]);
 
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
 
-        if ($httpCode == 201 || $httpCode == 200) {
-            $msgData = json_decode($response, true);
+            return ['code' => $httpCode, 'response' => $response, 'error' => $curlError];
+        };
+
+        $res = $executeSendMessage($accessToken);
+
+        // Automatic retry on 401 or token expired error
+        $isTokenExpired = ($res['code'] == 401 || str_contains($res['response'] ?? '', 'InvalidAuthenticationToken') || str_contains($res['response'] ?? '', 'token is expired'));
+        if ($isTokenExpired && ($freshToken = $this->acquireFreshToken())) {
+            $this->logAzureAction('AZURE_SEND_ADAPTIVE_CARD_RETRY_FRESH_TOKEN', [
+                'chat_id' => $chatId,
+                'initial_code' => $res['code'],
+                'reason' => 'Access token expired or 401 error received; automatically renewed token and retrying message send'
+            ]);
+            $res = $executeSendMessage($freshToken);
+        }
+
+        if ($res['code'] == 201 || $res['code'] == 200) {
+            $msgData = json_decode($res['response'], true);
             $this->logAzureAction('AZURE_SEND_ADAPTIVE_CARD_SUCCESS', [
                 'chat_id' => $chatId,
                 'message_id' => $msgData['id'] ?? null,
@@ -616,13 +724,19 @@ class AzureADSSO
 
         $this->logAzureAction('AZURE_SEND_ADAPTIVE_CARD_ERROR', [
             'chat_id' => $chatId,
-            'http_code' => $httpCode,
+            'http_code' => $res['code'],
             'request_payload_json' => $jsonPayload,
-            'response' => $response,
-            'curl_error' => $curlError
+            'response' => $res['response'],
+            'curl_error' => $res['error']
         ]);
 
-        return null;
+        return [
+            'chat_id' => $chatId,
+            'http_code' => $res['code'],
+            'request_payload_json' => $jsonPayload,
+            'response' => $res['response'],
+            'curl_error' => $res['error']
+        ];
     }
 
     /**
