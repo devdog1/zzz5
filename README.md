@@ -34,7 +34,7 @@ An elegant, extensible, enterprise-grade PHP/MySQL modular portal framework. Dev
 This framework cleanly separates **Core Platform Concerns** (Authentication, User Provisioning, Access Auditing, Plugin Dispatching, Task Scheduling, Site Branding) from **Features** (which are encapsulated inside plugin modules).
 
 Key components:
-- **`PluginManager.php`**: The central orchestrator. Handles discovery, header parsing, compatibility testing, dynamic permission/role provisioning, route matching, and event hook dispatching.
+- **`PluginManager.php`**: The central orchestrator. Handles discovery, header parsing, compatibility testing, dynamic permission/role provisioning, route matching, event hook dispatching, and automated cross-plugin hook/service call audit logging (`PLUGIN_CROSS_HOOK_CALL` and `PLUGIN_CROSS_SERVICE_CALL`).
 - **`PluginDatabase.php`**: Secure database isolation wrapper ensuring plugins operate strictly inside safe table prefixes (`plug_{plugin_slug}_*`) and preventing unauthorized SQL mutations on core or sibling tables.
 - **`Scheduler.php`**: Parallel background task scheduler with process spawning, concurrency locks, execution duration tracking, and stdout output capturing.
 - **`Auth.php` & `AzureADSSO.php`**: OAuth2 Single Sign-On (SSO) integration with Azure Active Directory and dynamic RBAC with permission checks, role grants, direct permissions, and explicit denials. Also includes Microsoft Graph API capabilities for group management, member synchronization, and Teams chat messaging.
@@ -413,7 +413,7 @@ Administrators can click **Check Compatibility** in `admin-plugins.php` before a
 - **Users & RBAC (`admin-users.php`)**: User directory, real-time user search filter (`#userSearchInput`), role assignments, direct permission grants, and explicit permission denials.
 - **Roles & Permissions (`admin-roles.php`)**: Create custom roles, enable/disable role statuses (`is_active`), configure assigned permissions, and delete custom roles.
 - **Azure AD Directory Groups (`admin-azure-groups.php`)**: Graph API group listing with `@odata.nextLink` pagination and mapping to local roles.
-- **Audit Trail Logs (`admin-logs.php`)**: Action audit logs with dynamic search, filters, action sorting, and CSV export.
+- **Audit Trail Logs (`admin-logs.php`)**: Action audit logs with dynamic search, filters, action sorting, CSV export, and tracking of cross-plugin hook (`PLUGIN_CROSS_HOOK_CALL`) and service (`PLUGIN_CROSS_SERVICE_CALL`) calls.
 - **System Diagnostics (`admin-diagnostics.php`)**: Server diagnostics, site branding (`site_name`), site-wide broadcast announcement banners (`broadcast_banner`), and PHP environment checks.
 
 ---

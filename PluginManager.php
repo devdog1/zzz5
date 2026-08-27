@@ -27,6 +27,59 @@ class PluginManager
     }
 
     /* =========================================================
+     * AUTOMATED CROSS-PLUGIN AUDIT TRAIL LOGGING HELPERS
+     * ========================================================= */
+
+    /**
+     * Determine the plugin slug associated with a given file path.
+     */
+    private function getPluginSlugFromPath($filepath)
+    {
+        if (empty($filepath)) return null;
+        $normalized = str_replace('\\', '/', $filepath);
+        if (preg_match('#/plugins/([^/]+)/#i', $normalized, $matches)) {
+            return $matches[1];
+        }
+        return null;
+    }
+
+    /**
+     * Determine the plugin slug associated with a given callback.
+     */
+    private function getPluginSlugFromCallback($callback)
+    {
+        try {
+            if (is_array($callback)) {
+                $ref = new ReflectionMethod($callback[0], $callback[1]);
+                return $this->getPluginSlugFromPath($ref->getFileName());
+            } elseif ($callback instanceof Closure || is_string($callback)) {
+                $ref = new ReflectionFunction($callback);
+                return $this->getPluginSlugFromPath($ref->getFileName());
+            }
+        } catch (Throwable $t) {
+            // Unable to reflect callback
+        }
+        return null;
+    }
+
+    /**
+     * Inspect execution stack backtrace to determine if caller originates from a plugin module.
+     */
+    private function getCallerPluginSlug()
+    {
+        $trace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 15);
+        foreach ($trace as $frame) {
+            if (!empty($frame['file'])) {
+                $slug = $this->getPluginSlugFromPath($frame['file']);
+                if ($slug !== null) {
+                    return $slug;
+                }
+            }
+        }
+        return null;
+    }
+
+    /* =========================================================
      * HOOKS: ACTIONS (Side-effects, outputting HTML, events)
      * ========================================================= */
     public function addAction($tag, $callback, $priority = 10)
@@ -43,11 +96,27 @@ class PluginManager
             return;
         }
 
+        $callerSlug = $this->getCallerPluginSlug();
+
         $priorities = $this->actions[$tag];
         ksort($priorities);
 
         foreach ($priorities as $priority => $callbacks) {
             foreach ($callbacks as $callback) {
+                $targetSlug = $this->getPluginSlugFromCallback($callback);
+
+                // Audit trail: Log when a plugin calls action hooks for another plugin
+                if ($callerSlug !== null && $targetSlug !== null && $callerSlug !== $targetSlug) {
+                    if (function_exists('log_action')) {
+                        log_action('PLUGIN_CROSS_HOOK_CALL', [
+                            'type' => 'action',
+                            'hook_tag' => $tag,
+                            'caller_plugin' => $callerSlug,
+                            'target_plugin' => $targetSlug
+                        ]);
+                    }
+                }
+
                 // SANDBOX SHIELD: Wrap each plugin hook execution in try/catch
                 try {
                     call_user_func_array($callback, $arg);
@@ -79,11 +148,27 @@ class PluginManager
             return $value;
         }
 
+        $callerSlug = $this->getCallerPluginSlug();
+
         $priorities = $this->filters[$tag];
         ksort($priorities);
 
         foreach ($priorities as $priority => $callbacks) {
             foreach ($callbacks as $callback) {
+                $targetSlug = $this->getPluginSlugFromCallback($callback);
+
+                // Audit trail: Log when a plugin calls filter hooks for another plugin
+                if ($callerSlug !== null && $targetSlug !== null && $callerSlug !== $targetSlug) {
+                    if (function_exists('log_action')) {
+                        log_action('PLUGIN_CROSS_HOOK_CALL', [
+                            'type' => 'filter',
+                            'hook_tag' => $tag,
+                            'caller_plugin' => $callerSlug,
+                            'target_plugin' => $targetSlug
+                        ]);
+                    }
+                }
+
                 // SANDBOX SHIELD: Wrap each filter hook execution in try/catch
                 try {
                     $value = call_user_func_array($callback, array_merge([$value], $arg));
@@ -136,6 +221,20 @@ class PluginManager
         // Context check: Enforce that user session context is active during execution
         if (session_status() === PHP_SESSION_NONE || !isset($_SESSION['user_id'])) {
             throw new Exception("Security context violation: An active user session is required to invoke cross-plugin services.");
+        }
+
+        $callerSlug = $this->getCallerPluginSlug();
+        $targetSlug = $service['plugin_slug'];
+
+        // Audit trail: Log cross-plugin service invocation
+        if ($callerSlug !== null && $targetSlug !== null && $callerSlug !== $targetSlug) {
+            if (function_exists('log_action')) {
+                log_action('PLUGIN_CROSS_SERVICE_CALL', [
+                    'service_name' => $service_name,
+                    'caller_plugin' => $callerSlug,
+                    'target_plugin' => $targetSlug
+                ]);
+            }
         }
 
         // Execute inside try/catch sandbox
