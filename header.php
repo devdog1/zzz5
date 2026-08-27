@@ -198,6 +198,11 @@ $site_name = get_setting('site_name', 'Framework Portal');
                                     </a>
                                 </li>
                                 <li>
+                                    <a class="dropdown-item <?= ($current_page === 'admin-roles.php') ? 'active' : '' ?>" href="admin-roles.php">
+                                        <i class="fa-solid fa-user-shield me-2 text-warning"></i> Roles & Permissions
+                                    </a>
+                                </li>
+                                <li>
                                     <a class="dropdown-item <?= ($current_page === 'admin-azure-groups.php') ? 'active' : '' ?>" href="admin-azure-groups.php">
                                         <i class="fa-brands fa-microsoft me-2 text-info"></i> Azure AD Groups
                                     </a>

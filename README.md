@@ -42,6 +42,7 @@ Key components:
 - **`admin-scheduler.php`**: Visual task overrides, frequency customization, on-demand task runner, stdout viewer, and execution logs.
 - **`admin-nav.php`**: Main navigation menu reordering, custom label overrides, and visibility toggle controls.
 - **`admin-users.php`**: Visual user directory with real-time live search filter (`#userSearchInput`), RBAC permission management, and `modal-xl` responsive privilege dialogs.
+- **`admin-roles.php`**: Dedicated administration interface to create custom RBAC roles, edit role descriptions, enable/disable active role status (`is_active`), manage role permissions, and view member counts.
 - **`admin-azure-groups.php`**: Microsoft Graph API Azure AD directory group listing and dynamic local role mapping.
 - **`admin-logs.php`**: Action audit logs with dynamic search filters, action sorting, and CSV export.
 - **`admin-diagnostics.php`**: Server diagnostics, site name branding (`site_name`), site-wide broadcast announcement banners (`broadcast_banner`), and PHP environment checks.
@@ -409,6 +410,7 @@ Administrators can click **Check Compatibility** in `admin-plugins.php` before a
 - **Task Scheduler (`admin-scheduler.php`)**: Custom schedule overrides, enable/disable switches, on-demand task runner with stdout viewer, execution logs, and runtime duration metrics.
 - **Navigation Manager (`admin-nav.php`)**: Main menu link re-ordering, custom label overrides, and show/hide visibility toggles.
 - **Users & RBAC (`admin-users.php`)**: User directory, real-time user search filter (`#userSearchInput`), role assignments, direct permission grants, and explicit permission denials.
+- **Roles & Permissions (`admin-roles.php`)**: Create custom roles, enable/disable role statuses (`is_active`), configure assigned permissions, and delete custom roles.
 - **Azure AD Directory Groups (`admin-azure-groups.php`)**: Graph API group listing with `@odata.nextLink` pagination and mapping to local roles.
 - **Audit Trail Logs (`admin-logs.php`)**: Action audit logs with dynamic search, filters, action sorting, and CSV export.
 - **System Diagnostics (`admin-diagnostics.php`)**: Server diagnostics, site branding (`site_name`), site-wide broadcast announcement banners (`broadcast_banner`), and PHP environment checks.

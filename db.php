@@ -17,7 +17,23 @@ function get_db_connection() {
     ];
 
     try {
-        return new PDO($dsn, $user, $pass, $options);
+        $pdo = new PDO($dsn, $user, $pass, $options);
+
+        // Auto-migration check: Ensure roles table contains is_active column
+        static $roles_schema_checked = false;
+        if (!$roles_schema_checked) {
+            $roles_schema_checked = true;
+            try {
+                $cols = $pdo->query("SHOW COLUMNS FROM roles LIKE 'is_active'")->fetchAll();
+                if (empty($cols)) {
+                    $pdo->exec("ALTER TABLE roles ADD COLUMN is_active TINYINT(1) DEFAULT 1 AFTER description");
+                }
+            } catch (Exception $e) {
+                // Ignore schema migration exceptions if table does not yet exist
+            }
+        }
+
+        return $pdo;
     } catch (\PDOException $e) {
         throw new \PDOException($e->getMessage(), (int)$e->getCode());
     }

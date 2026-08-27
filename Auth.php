@@ -174,6 +174,7 @@ class Auth
                 FROM azure_group_roles agr
                 JOIN roles r ON r.id = agr.role_id
                 WHERE agr.azure_group_name IN ($in)
+                  AND (r.is_active = 1 OR r.is_active IS NULL)
             ");
 
             $stmt->execute($groups);
@@ -188,6 +189,7 @@ class Auth
             FROM user_roles ur
             JOIN roles r ON r.id = ur.role_id
             WHERE ur.user_id = ?
+              AND (r.is_active = 1 OR r.is_active IS NULL)
         ");
 
         $stmt->execute([$userId]);
@@ -224,6 +226,7 @@ class Auth
             JOIN roles r ON r.id = rp.role_id
             JOIN user_roles ur ON ur.role_id = r.id
             WHERE ur.user_id = ?
+              AND (r.is_active = 1 OR r.is_active IS NULL)
         ";
 
         $stmt = $this->db->prepare($sql);
@@ -241,8 +244,10 @@ class Auth
                 SELECT p.permission_name
                 FROM permissions p
                 JOIN role_permissions rp ON rp.permission_id = p.id
-                JOIN azure_group_roles agr ON agr.role_id = rp.role_id
+                JOIN roles r ON r.id = rp.role_id
+                JOIN azure_group_roles agr ON agr.role_id = r.id
                 WHERE agr.azure_group_name IN ($in)
+                  AND (r.is_active = 1 OR r.is_active IS NULL)
             ";
 
             $stmt = $this->db->prepare($sql);
