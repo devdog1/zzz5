@@ -155,40 +155,81 @@ class AzureADSSO
         return $this->logoutUrl . '?post_logout_redirect_uri=' . urlencode($postLogoutRedirectUri);
     }
 
+    /**
+     * Retrieve full list of groups assigned to the authenticated user via Graph API,
+     * supporting @odata.nextLink pagination and automatic token renewal on 401 errors.
+     *
+     * @param string $accessToken
+     * @return array List of group display names
+     */
     public function getUserGroups($accessToken)
     {
-        $graphUrl = "https://graph.microsoft.com/v1.0/me/memberOf";
-
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $graphUrl);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Authorization: Bearer ' . $accessToken,
-            'Content-Type: application/json',
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
-
-        if ($httpCode == 200) {
-            $groupsData = json_decode($response, true);
-            $groupNames = [];
-
-            if (isset($groupsData['value'])) {
-                foreach ($groupsData['value'] as $group) {
-                    if (isset($group['displayName'])) {
-                        $groupNames[] = $group['displayName'];
-                    }
-                }
+        if (empty($accessToken)) {
+            if (function_exists('get_azure_access_token')) {
+                $accessToken = get_azure_access_token();
+            } else {
+                $accessToken = $_SESSION['user']['access_token'] ?? $_SESSION['access_token'] ?? $_SESSION['azure_access_token'] ?? $_SESSION['tokens']['access_token'] ?? null;
             }
-
-            $this->logAzureAction('AZURE_GET_USER_GROUPS_SUCCESS', ['count' => count($groupNames), 'groups' => $groupNames]);
-            return $groupNames;
         }
 
-        $this->logAzureAction('AZURE_GET_USER_GROUPS_ERROR', ['http_code' => $httpCode, 'response' => $response, 'curl_error' => $curlError]);
+        $fetchUserGroupPages = function($token) {
+            $groupNames = [];
+            $nextUrl = "https://graph.microsoft.com/v1.0/me/memberOf?\$select=id,displayName&\$top=999";
+            $pageCount = 0;
+
+            while (!empty($nextUrl) && $pageCount < 50) { // Safety cap of 50 pages
+                $ch = curl_init();
+                curl_setopt($ch, CURLOPT_URL, $nextUrl);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    'Authorization: Bearer ' . $token,
+                    'Content-Type: application/json',
+                ]);
+
+                $response = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $curlError = curl_error($ch);
+                curl_close($ch);
+
+                if ($httpCode != 200) {
+                    return ['success' => false, 'code' => $httpCode, 'response' => $response, 'error' => $curlError, 'groups' => $groupNames];
+                }
+
+                $data = json_decode($response, true);
+                if (isset($data['value']) && is_array($data['value'])) {
+                    foreach ($data['value'] as $group) {
+                        if (!empty($group['displayName'])) {
+                            $groupNames[] = $group['displayName'];
+                        }
+                    }
+                }
+
+                // Check for Microsoft Graph @odata.nextLink pagination URL
+                $nextUrl = $data['@odata.nextLink'] ?? null;
+                $pageCount++;
+            }
+
+            return ['success' => true, 'code' => 200, 'groups' => array_unique($groupNames)];
+        };
+
+        $res = $fetchUserGroupPages($accessToken);
+
+        // Automatic retry if token expired / 401 error
+        $isTokenExpired = (!$res['success'] && ($res['code'] == 401 || str_contains($res['response'] ?? '', 'InvalidAuthenticationToken') || str_contains($res['response'] ?? '', 'token is expired')));
+        if ($isTokenExpired && ($freshToken = $this->acquireFreshToken())) {
+            $this->logAzureAction('AZURE_GET_USER_GROUPS_RETRY_FRESH_TOKEN', [
+                'initial_code' => $res['code'],
+                'reason' => 'Access token expired; automatically renewed token and retrying getUserGroups'
+            ]);
+            $res = $fetchUserGroupPages($freshToken);
+        }
+
+        if ($res['success']) {
+            $this->logAzureAction('AZURE_GET_USER_GROUPS_SUCCESS', ['count' => count($res['groups']), 'groups' => $res['groups']]);
+            return $res['groups'];
+        }
+
+        $this->logAzureAction('AZURE_GET_USER_GROUPS_ERROR', ['http_code' => $res['code'], 'response' => $res['response'], 'curl_error' => $res['error']]);
         return [];
     }
 

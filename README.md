@@ -129,6 +129,7 @@ The framework includes robust integration with Azure AD OAuth2 Single Sign-On an
 - **User Provisioning**: Prefers `userInfo['oid']` (Azure AD Object ID UUID) over `sub` (pairwise token) for consistent user matching across applications.
 - **Token Synchronization**: Synchronizes acquired access tokens across 4 standard session keys during login.
 - **Automatic Token Refresh & Retry**: Handles HTTP 401 (`InvalidAuthenticationToken` / expired token) errors transparently by automatically renewing tokens via OAuth `refresh_token` (or falling back to app client credentials) and retrying requests seamlessly.
+- **`getUserGroups($accessToken)`**: Retrieves the full list of groups assigned to the authenticated user during SSO login, with automatic `@odata.nextLink` multi-page pagination and automatic 401 token refresh retry.
 - **`getAllGroups($accessToken = null)`**: Fetches all Azure AD Directory Groups with automatic `@odata.nextLink` multi-page pagination support.
 - **`getGroupMembers($groupId, $accessToken = null)`**: Retrieves member objects for a specific Azure AD group, automatically sanitizing parameter order and falling back to client credential app tokens when delegated tokens expire.
 - **`createChat($topic, $memberIds = [], $accessToken = null)`**: Creates a Microsoft Teams 1:1 or group chat conversation via Graph API (`POST /chats`). Includes automatic caller inclusion, member deduplication, non-UUID filtering, and verbose JSON logging.
