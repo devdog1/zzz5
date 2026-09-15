@@ -175,6 +175,7 @@ class Auth
         $roles = [];
 
         if (!empty($groups)) {
+            $groups = array_values(array_unique($groups));
             $in = implode(',', array_fill(0, count($groups), '?'));
 
             $stmt = $this->db->prepare("
@@ -246,6 +247,7 @@ class Auth
 
         /* 2. AZURE GROUP ROLE PERMISSIONS */
         if (!empty($groups)) {
+            $groups = array_values(array_unique($groups));
             $in = implode(',', array_fill(0, count($groups), '?'));
 
             $sql = "

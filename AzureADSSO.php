@@ -209,7 +209,7 @@ class AzureADSSO
                 $pageCount++;
             }
 
-            return ['success' => true, 'code' => 200, 'groups' => array_unique($groupNames)];
+            return ['success' => true, 'code' => 200, 'groups' => array_values(array_unique($groupNames))];
         };
 
         $res = $fetchUserGroupPages($accessToken);
