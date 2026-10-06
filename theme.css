@@ -135,12 +135,70 @@ body {
     color: #ffffff !important;
 }
 
-/* User Session Profile & Pill Buttons */
+/* User Session Profile & Role Hover Card */
 .user-pill {
     background-color: #f1f5f9;
     border: 1px solid #cbd5e1;
     border-radius: 50rem;
     padding: 0.35rem 1rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.user-pill:hover {
+    background-color: #e2e8f0;
+    border-color: #94a3b8;
+}
+
+.role-hover-container {
+    display: inline-block;
+}
+
+.role-hover-card {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.5rem;
+    min-width: 180px;
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.12);
+    z-index: 1050;
+    overflow: hidden;
+    text-align: left;
+}
+
+.role-hover-container:hover .role-hover-card {
+    display: block;
+}
+
+.role-hover-header {
+    background-color: #2A3239;
+    color: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.4rem 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.role-hover-body {
+    padding: 0.5rem 0.8rem;
+}
+
+.role-hover-item {
+    font-size: 0.825rem;
+    font-weight: 600;
+    color: #2A3239;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #f1f5f9;
+    white-space: nowrap;
+}
+
+.role-hover-item:last-child {
+    border-bottom: none;
 }
 
 .btn-pill {

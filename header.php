@@ -9,7 +9,10 @@ if ($current_page !== 'login.php' && $current_page !== 'callback.php') {
 
 $user_display_name = $_SESSION['user']['name'] ?? 'User';
 $user_roles = isset($_SESSION['roles']) ? array_keys($_SESSION['roles']) : [];
-$user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
+$user_roles_hover_str = implode("\n", array_map('ucfirst', $user_roles));
+if (empty($user_roles_hover_str)) {
+    $user_roles_hover_str = 'No Roles Assigned';
+}
 $site_name = get_setting('site_name', 'Framework Portal');
 ?>
 <!DOCTYPE html>
@@ -209,9 +212,21 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
             <!-- User Session profile & logout -->
             <?php if (isset($_SESSION['user_id'])): ?>
                 <div class="d-flex align-items-center">
-                    <div class="user-pill me-3 text-end d-none d-sm-block">
-                        <span class="fw-bold small text-dark me-1"><?= htmlspecialchars($user_display_name) ?></span>
-                        <span class="badge bg-primary rounded-pill small ms-1" style="font-size: 0.7rem;"><?= htmlspecialchars($user_roles_str) ?></span>
+                    <div class="user-pill me-3 text-end d-none d-sm-block position-relative role-hover-container">
+                        <span class="fw-bold small text-dark cursor-pointer">
+                            <i class="fa-solid fa-circle-user me-1 text-primary"></i><?= htmlspecialchars($user_display_name) ?>
+                        </span>
+                        <div class="role-hover-card shadow-sm">
+                            <div class="role-hover-header">Roles & Memberships</div>
+                            <div class="role-hover-body">
+                                <?php foreach ($user_roles as $role): ?>
+                                    <div class="role-hover-item"><i class="fa-solid fa-shield-halved me-1 text-primary"></i><?= htmlspecialchars(ucfirst($role)) ?></div>
+                                <?php endforeach; ?>
+                                <?php if (empty($user_roles)): ?>
+                                    <div class="role-hover-item text-muted">No roles assigned</div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     </div>
                     <a href="logout.php" class="btn btn-sm btn-outline-danger btn-pill">
                         <i class="fa-solid fa-right-from-bracket me-1"></i>Logout
