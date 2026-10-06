@@ -22,6 +22,54 @@ body {
     font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
 }
 
+/* Thin Top Black Admin Navigation Bar */
+.admin-topbar {
+    background-color: #1a202c !important;
+    color: #e2e8f0;
+    font-size: 0.8rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid #2d3748;
+}
+
+.admin-topbar .nav-link {
+    color: #cbd5e1 !important;
+    font-weight: 500;
+    font-size: 0.8rem;
+    padding: 0.2rem 0.6rem !important;
+    transition: color 0.15s ease-in-out;
+}
+
+.admin-topbar .nav-link:hover,
+.admin-topbar .nav-link:focus {
+    color: #ffffff !important;
+}
+
+.admin-topbar .dropdown-menu {
+    font-size: 0.85rem;
+    border: 1px solid #2d3748;
+    background-color: #1a202c;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 0.4rem;
+}
+
+.admin-topbar .dropdown-item {
+    color: #e2e8f0;
+    border-radius: 4px;
+    padding: 0.4rem 0.8rem;
+}
+
+.admin-topbar .dropdown-item:hover {
+    background-color: #2d3748;
+    color: #ffffff;
+}
+
+.admin-topbar .dropdown-item.active {
+    background-color: #0065A4;
+    color: #ffffff !important;
+}
+
 /* Westman Navigation Bar Styling */
 .navbar-westman {
     background-color: #ffffff !important;

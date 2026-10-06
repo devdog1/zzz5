@@ -30,6 +30,75 @@ $site_name = get_setting('site_name', 'Framework Portal');
 </head>
 <body>
 
+<?php
+$is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_permission('manage_settings');
+?>
+
+<?php if ($is_admin_user): ?>
+<!-- Thin Black Admin Navigation Bar Above Main Nav -->
+<nav class="navbar navbar-expand admin-topbar">
+    <div class="container d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <span class="badge bg-warning text-dark me-2" style="font-size: 0.65rem;">ADMIN MODE</span>
+            <small class="text-white-50 d-none d-sm-inline">System Administration Control Panel</small>
+        </div>
+        <ul class="navbar-nav align-items-center ms-auto">
+            <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle text-warning fw-semibold" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fa-solid fa-screwdriver-wrench me-1"></i> Administration
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <?php if (has_permission('manage_plugins')): ?>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-plugins.php') ? 'active' : '' ?>" href="admin-plugins.php">
+                                <i class="fa-solid fa-puzzle-piece me-2 text-primary"></i> Modules & Plugins
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-scheduler.php') ? 'active' : '' ?>" href="admin-scheduler.php">
+                                <i class="fa-solid fa-clock-rotate-left me-2 text-warning"></i> Task Scheduler
+                            </a>
+                        </li>
+                    <?php endif; ?>
+                    <?php if (has_permission('manage_settings')): ?>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-nav.php') ? 'active' : '' ?>" href="admin-nav.php">
+                                <i class="fa-solid fa-bars-staggered me-2 text-info"></i> Navigation Manager
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
+                                <i class="fa-solid fa-users-gear me-2 text-success"></i> Users & RBAC
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-roles.php') ? 'active' : '' ?>" href="admin-roles.php">
+                                <i class="fa-solid fa-user-shield me-2 text-warning"></i> Roles & Permissions
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-azure-groups.php') ? 'active' : '' ?>" href="admin-azure-groups.php">
+                                <i class="fa-brands fa-microsoft me-2 text-info"></i> Azure AD Groups
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-logs.php') ? 'active' : '' ?>" href="admin-logs.php">
+                                <i class="fa-solid fa-receipt me-2 text-primary"></i> Audit Trail Logs
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-diagnostics.php') ? 'active' : '' ?>" href="admin-diagnostics.php">
+                                <i class="fa-solid fa-stethoscope me-2 text-danger"></i> System Diagnostics
+                            </a>
+                        </li>
+                    <?php endif; ?>
+                </ul>
+            </li>
+        </ul>
+    </div>
+</nav>
+<?php endif; ?>
+
 <nav class="navbar navbar-expand-lg navbar-westman mb-4">
     <div class="container">
         <a class="navbar-brand d-flex align-items-center" href="index.php">
@@ -133,61 +202,8 @@ $site_name = get_setting('site_name', 'Framework Portal');
                 ?>
             </ul>
 
-            <!-- Right Side Navbar Menu (Consolidating Core Admin links to the right dropdown) -->
+            <!-- Right Side Navbar Menu -->
             <ul class="navbar-nav ms-auto align-items-center me-3">
-                <?php if (has_permission('manage_plugins') || has_permission('manage_settings')): ?>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fa-solid fa-screwdriver-wrench me-1 text-primary"></i> Administration
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <?php if (has_permission('manage_plugins')): ?>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-plugins.php') ? 'active' : '' ?>" href="admin-plugins.php">
-                                        <i class="fa-solid fa-puzzle-piece me-2 text-primary"></i> Modules & Plugins
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-scheduler.php') ? 'active' : '' ?>" href="admin-scheduler.php">
-                                        <i class="fa-solid fa-clock-rotate-left me-2 text-warning"></i> Task Scheduler
-                                    </a>
-                                </li>
-                            <?php endif; ?>
-                            <?php if (has_permission('manage_settings')): ?>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-nav.php') ? 'active' : '' ?>" href="admin-nav.php">
-                                        <i class="fa-solid fa-bars-staggered me-2 text-info"></i> Navigation Manager
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
-                                        <i class="fa-solid fa-users-gear me-2 text-success"></i> Users & RBAC
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-roles.php') ? 'active' : '' ?>" href="admin-roles.php">
-                                        <i class="fa-solid fa-user-shield me-2 text-warning"></i> Roles & Permissions
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-azure-groups.php') ? 'active' : '' ?>" href="admin-azure-groups.php">
-                                        <i class="fa-brands fa-microsoft me-2 text-info"></i> Azure AD Groups
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-logs.php') ? 'active' : '' ?>" href="admin-logs.php">
-                                        <i class="fa-solid fa-receipt me-2 text-primary"></i> Audit Trail Logs
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-diagnostics.php') ? 'active' : '' ?>" href="admin-diagnostics.php">
-                                        <i class="fa-solid fa-stethoscope me-2 text-danger"></i> System Diagnostics
-                                    </a>
-                                </li>
-                            <?php endif; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
             </ul>
 
             <!-- User Session profile & logout -->
