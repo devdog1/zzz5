@@ -20,46 +20,13 @@ $site_name = get_setting('site_name', 'Framework Portal');
     <title><?= htmlspecialchars($site_name) ?></title>
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Brand Guidelines Theme Override CSS -->
+    <link href="theme.css" rel="stylesheet">
     <!-- FontAwesome icons -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
 
     <!-- Action Hook for custom plugin styles / scripts inside <head> -->
     <?php $pluginManager->doAction('theme_head'); ?>
-
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .navbar-brand {
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            margin-bottom: 20px;
-        }
-        /* Widget Resizing Rules: ensure plugin widgets stretch to fill 100% width of resized grid container */
-        .widget-item {
-            display: flex;
-            flex-direction: column;
-        }
-        .widget-inner-content,
-        .widget-inner-content > div,
-        .widget-inner-content .card,
-        .widget-inner-content .widget-block {
-            width: 100% !important;
-            max-width: 100% !important;
-            flex: 1 1 auto;
-        }
-        .card-header {
-            background-color: #fff;
-            border-bottom: 1px solid #f2f2f2;
-            font-weight: 600;
-        }
-    </style>
 </head>
 <body>
 
