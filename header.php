@@ -30,12 +30,12 @@ $site_name = get_setting('site_name', 'Framework Portal');
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+<nav class="navbar navbar-expand-lg navbar-westman mb-4">
     <div class="container">
-        <a class="navbar-brand" href="index.php">
-            <i class="fa-solid fa-cubes me-2 text-info"></i><?= htmlspecialchars($site_name) ?>
+        <a class="navbar-brand d-flex align-items-center" href="index.php">
+            <i class="fa-solid fa-cubes me-2 fs-3"></i><span><?= htmlspecialchars($site_name) ?></span>
         </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
@@ -138,7 +138,7 @@ $site_name = get_setting('site_name', 'Framework Portal');
                 <?php if (has_permission('manage_plugins') || has_permission('manage_settings')): ?>
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fa-solid fa-screwdriver-wrench me-1 text-warning"></i> Administration
+                            <i class="fa-solid fa-screwdriver-wrench me-1 text-primary"></i> Administration
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
                             <?php if (has_permission('manage_plugins')): ?>
@@ -192,12 +192,12 @@ $site_name = get_setting('site_name', 'Framework Portal');
 
             <!-- User Session profile & logout -->
             <?php if (isset($_SESSION['user_id'])): ?>
-                <div class="d-flex align-items-center text-white">
-                    <div class="me-3 text-end">
-                        <div class="fw-bold small"><?= htmlspecialchars($user_display_name) ?></div>
-                        <div class="text-muted small" style="font-size: 0.75rem;"><?= htmlspecialchars($user_roles_str) ?></div>
+                <div class="d-flex align-items-center">
+                    <div class="user-pill me-3 text-end d-none d-sm-block">
+                        <span class="fw-bold small text-dark me-1"><?= htmlspecialchars($user_display_name) ?></span>
+                        <span class="badge bg-primary rounded-pill small ms-1" style="font-size: 0.7rem;"><?= htmlspecialchars($user_roles_str) ?></span>
                     </div>
-                    <a href="logout.php" class="btn btn-sm btn-outline-danger">
+                    <a href="logout.php" class="btn btn-sm btn-outline-danger btn-pill">
                         <i class="fa-solid fa-right-from-bracket me-1"></i>Logout
                     </a>
                 </div>
