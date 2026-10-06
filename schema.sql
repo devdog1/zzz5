@@ -107,10 +107,13 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- 5. Plugins Activation Table
+-- 5. Plugins Activation Table with Optional Version Tracking
 CREATE TABLE IF NOT EXISTS active_plugins (
     id INT AUTO_INCREMENT PRIMARY KEY,
     plugin_slug VARCHAR(100) NOT NULL UNIQUE,
-    activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    installed_version VARCHAR(50) DEFAULT '1.0.0',
+    activated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 -- 6. Task Scheduler Tracking Table with Dynamic Overrides and Enablement

@@ -293,6 +293,127 @@ class PluginManager
         }
     }
 
+    /**
+     * Retrieve the currently installed DB version of a plugin.
+     *
+     * @param string $slug
+     * @return string|null
+     */
+    public function getInstalledPluginVersion($slug)
+    {
+        try {
+            $db = get_db_connection();
+            // Check if installed_version column exists
+            $stmt = $db->prepare("SELECT installed_version FROM active_plugins WHERE plugin_slug = ?");
+            $stmt->execute([$slug]);
+            $row = $stmt->fetch();
+            return $row ? ($row['installed_version'] ?? '1.0.0') : null;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Run version migrations for an active plugin if its disk version is newer than installed_version in DB.
+     * Supports sequential multi-version SQL migrations in plugins/{slug}/sql/migrations/ (e.g. 1.1.0.sql, 2.0.0.sql)
+     * as well as the 'plugin_migrate_{slug}' action hook.
+     *
+     * @param string $slug
+     * @param string $currentVersion Disk version from plugin header
+     * @param string|null $installedVersion Currently installed DB version
+     */
+    public function migratePlugin($slug, $currentVersion, $installedVersion = null)
+    {
+        if (empty($currentVersion)) return;
+
+        if ($installedVersion === null) {
+            $installedVersion = $this->getInstalledPluginVersion($slug);
+        }
+
+        if (empty($installedVersion)) {
+            $installedVersion = '1.0.0';
+        }
+
+        // Check if current disk version is newer than installed version
+        if (version_compare($currentVersion, $installedVersion, '>')) {
+            $pluginsDir = __DIR__ . '/plugins';
+            $pluginDir = $pluginsDir . '/' . $slug;
+            $migrationsDir = $pluginDir . '/sql/migrations';
+
+            $db = get_db_connection();
+
+            // 1. Look for SQL migration files in plugins/{slug}/sql/migrations/
+            if (is_dir($migrationsDir)) {
+                $files = scandir($migrationsDir);
+                $migrationFiles = [];
+
+                foreach ($files as $file) {
+                    if ($file === '.' || $file === '..') continue;
+                    if (pathinfo($file, PATHINFO_EXTENSION) === 'sql') {
+                        $migVersion = pathinfo($file, PATHINFO_FILENAME);
+                        // Filter migration files that are > $installedVersion and <= $currentVersion
+                        if (version_compare($migVersion, $installedVersion, '>') && version_compare($migVersion, $currentVersion, '<=')) {
+                            $migrationFiles[$migVersion] = $migrationsDir . '/' . $file;
+                        }
+                    }
+                }
+
+                // Sort migration files sequentially by version ASC
+                uksort($migrationFiles, 'version_compare');
+
+                foreach ($migrationFiles as $mVer => $mFile) {
+                    try {
+                        $sql = file_get_contents($mFile);
+                        $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
+                        $expected_prefix = 'plug_' . $clean_slug . '_';
+                        $sql = str_replace('{prefix}', $expected_prefix, $sql);
+
+                        $db->exec($sql);
+
+                        // Update DB installed_version after each successful migration step
+                        $stmt = $db->prepare("UPDATE active_plugins SET installed_version = ? WHERE plugin_slug = ?");
+                        $stmt->execute([$mVer, $slug]);
+
+                        if (function_exists('log_action')) {
+                            log_action('PLUGIN_MIGRATION_STEP_SUCCESS', [
+                                'slug' => $slug,
+                                'migrated_to_version' => $mVer,
+                                'file' => basename($mFile)
+                            ]);
+                        }
+                    } catch (Throwable $t) {
+                        $err = "Migration failed for plugin '{$slug}' at version {$mVer}: " . $t->getMessage();
+                        error_log($err);
+                        if (function_exists('log_action')) {
+                            log_action('PLUGIN_MIGRATION_ERROR', ['slug' => $slug, 'version' => $mVer, 'error' => $err]);
+                        }
+                        return false; // Stop further migrations if a step fails
+                    }
+                }
+            }
+
+            // 2. Trigger custom migration action hook
+            $this->doAction("plugin_migrate_{$slug}", $installedVersion, $currentVersion);
+
+            // 3. Finalize installed version in DB to current disk version
+            try {
+                $stmt = $db->prepare("UPDATE active_plugins SET installed_version = ? WHERE plugin_slug = ?");
+                $stmt->execute([$currentVersion, $slug]);
+                if (function_exists('log_action')) {
+                    log_action('PLUGIN_MIGRATED_SUCCESS', [
+                        'slug' => $slug,
+                        'from_version' => $installedVersion,
+                        'to_version' => $currentVersion
+                    ]);
+                }
+            } catch (Throwable $t) {
+                error_log("Failed to update installed_version for plugin {$slug}: " . $t->getMessage());
+            }
+        }
+
+        return true;
+    }
+
     public function getActivePlugins()
     {
         return $this->activePlugins;
@@ -700,9 +821,20 @@ class PluginManager
                 }
             }
 
-            // Save active state to DB
-            $stmt = $db->prepare("INSERT IGNORE INTO active_plugins (plugin_slug) VALUES (?)");
-            $stmt->execute([$slug]);
+            // Save active state to DB with version tracking if supported
+            $pluginVersion = $meta['version'] ?? '1.0.0';
+            try {
+                $stmt = $db->prepare("
+                    INSERT INTO active_plugins (plugin_slug, installed_version)
+                    VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE installed_version = VALUES(installed_version)
+                ");
+                $stmt->execute([$slug, $pluginVersion]);
+            } catch (Exception $e) {
+                // Fallback for DB schemas without installed_version column
+                $stmt = $db->prepare("INSERT IGNORE INTO active_plugins (plugin_slug) VALUES (?)");
+                $stmt->execute([$slug]);
+            }
 
             $db->commit();
             $this->activePlugins[] = $slug;
@@ -816,6 +948,12 @@ class PluginManager
                 // Wrap each plugin booting individually to ensure faulty plugins don't break loading
                 try {
                     require_once $pluginFile;
+
+                    // Parse plugin version and run migrations if newer version installed
+                    $meta = $this->parsePluginHeader($pluginFile);
+                    if (!empty($meta['version'])) {
+                        $this->migratePlugin($slug, $meta['version']);
+                    }
                 } catch (Throwable $t) {
                     $err_msg = "Error booting plugin [{$slug}]: " . $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
                     $this->pluginErrors[$slug] = $err_msg;
