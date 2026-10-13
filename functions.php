@@ -4,6 +4,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/Auth.php';
 require_once __DIR__ . '/Scheduler.php';
 require_once __DIR__ . '/PluginManager.php';
+require_once __DIR__ . '/Mailer.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();

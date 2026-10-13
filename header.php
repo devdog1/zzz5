@@ -85,6 +85,11 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                             </a>
                         </li>
                         <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-email.php') ? 'active' : '' ?>" href="admin-email.php">
+                                <i class="fa-solid fa-paper-plane me-2 text-info"></i> Outbound Email & Logs
+                            </a>
+                        </li>
+                        <li>
                             <a class="dropdown-item <?= ($current_page === 'admin-logs.php') ? 'active' : '' ?>" href="admin-logs.php">
                                 <i class="fa-solid fa-receipt me-2 text-primary"></i> Audit Trail Logs
                             </a>

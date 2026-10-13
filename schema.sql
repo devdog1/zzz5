@@ -156,6 +156,21 @@ CREATE TABLE IF NOT EXISTS user_widget_preferences (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- 9. Outbound Email Tracking Logs Table
+CREATE TABLE IF NOT EXISTS email_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    from_address VARCHAR(255) NOT NULL,
+    envelope_from VARCHAR(255) DEFAULT NULL,
+    to_address VARCHAR(255) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    body LONGTEXT NOT NULL,
+    plugin_slug VARCHAR(100) DEFAULT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending', -- 'sent', 'failed', 'pending'
+    smtp_code VARCHAR(50) DEFAULT NULL, -- SMTP DSN Code e.g. '250 2.0.0', '550 5.1.1'
+    smtp_message TEXT DEFAULT NULL,
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 INSERT IGNORE INTO permissions (id, permission_name, description) VALUES
 (1, 'manage_settings', 'Modify system and plugin settings'),
 (2, 'manage_plugins', 'Activate/Deactivate plugins'),
@@ -171,4 +186,12 @@ INSERT IGNORE INTO default_roles (role_id) VALUES (3);
 -- Seed Initial Settings
 INSERT IGNORE INTO settings (setting_key, setting_value) VALUES
 ('site_name', 'Framework Portal'),
-('azure_default_domain', 'example.com');
+('azure_default_domain', 'example.com'),
+('email_from_address', 'noreply@example.com'),
+('email_envelope_from', 'bounces@example.com'),
+('email_smtp_host', 'localhost'),
+('email_smtp_port', '25'),
+('email_smtp_encryption', 'none'),
+('email_smtp_auth', '0'),
+('email_smtp_user', ''),
+('email_smtp_pass', '');
