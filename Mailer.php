@@ -141,7 +141,7 @@ class Mailer
                     $data_res = $this->readSmtpResponse($fp);
 
                     $smtp_code = $this->parseSmtpCode($data_res);
-                    $smtp_message = trim($data_res);
+                    $smtp_message = "Relay Response: " . trim($data_res) . " [Envelope From: {$effective_env_from}, RCPT: {$to}]";
                     $success = $this->isSmtpSuccess($data_res);
 
                     fputs($fp, "QUIT\r\n");

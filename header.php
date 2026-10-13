@@ -129,13 +129,42 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                 $raw_nav_links = [];
                 $raw_nav_links = $pluginManager->applyFilters('theme_nav_links', $raw_nav_links);
 
+                // Consolidate sub-menu items attached to existing top-level parent menus (via 'parent' key matching route or label)
+                $consolidated_links = [];
+                $parent_index_map = [];
+
+                foreach ($raw_nav_links as $link) {
+                    // Check if this item is explicitly targeted as a child attaching to an existing parent navigation node
+                    if (!empty($link['parent'])) {
+                        $parent_key = strtolower(trim($link['parent']));
+
+                        // Search if parent node already exists in consolidated links
+                        if (isset($parent_index_map[$parent_key])) {
+                            $idx = $parent_index_map[$parent_key];
+                            if (!isset($consolidated_links[$idx]['children'])) {
+                                $consolidated_links[$idx]['children'] = [];
+                            }
+                            $consolidated_links[$idx]['children'][] = $link;
+                            continue;
+                        }
+                    }
+
+                    // Top-level navigation node
+                    $item_key = !empty($link['route']) ? strtolower($link['route']) : preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($link['label']));
+                    $link_idx = count($consolidated_links);
+                    $consolidated_links[] = $link;
+
+                    $parent_index_map[$item_key] = $link_idx;
+                    $parent_index_map[strtolower(trim($link['label']))] = $link_idx;
+                }
+
                 $nav_config_json = get_setting('nav_menu_config', '{}');
                 $nav_config = json_decode($nav_config_json, true) ?: [];
 
                 $processed_nav_links = [];
                 $default_order = 100;
 
-                foreach ($raw_nav_links as $link) {
+                foreach ($consolidated_links as $link) {
                     $item_id = !empty($link['route']) ? $link['route'] : preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($link['label']));
                     $cfg = $nav_config[$item_id] ?? [];
 
