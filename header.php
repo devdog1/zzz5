@@ -129,16 +129,19 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                 $raw_nav_links = [];
                 $raw_nav_links = $pluginManager->applyFilters('theme_nav_links', $raw_nav_links);
 
-                // Consolidate sub-menu items attached to existing top-level parent menus (via 'parent' key matching route or label)
+                // Consolidate sub-menu items attached to existing or new parent menus (via 'parent' key matching route or label)
                 $consolidated_links = [];
                 $parent_index_map = [];
 
                 foreach ($raw_nav_links as $link) {
-                    // Check if this item is explicitly targeted as a child attaching to an existing parent navigation node
+                    // Check if this item is explicitly targeted as a child attaching to a parent navigation node
                     if (!empty($link['parent'])) {
-                        $parent_key = strtolower(trim($link['parent']));
+                        $parent_info = $link['parent'];
+                        $parent_key = is_array($parent_info)
+                            ? strtolower(trim($parent_info['route'] ?? $parent_info['label'] ?? ''))
+                            : strtolower(trim($parent_info));
 
-                        // Search if parent node already exists in consolidated links
+                        // 1. Search if parent node already exists in consolidated links
                         if (isset($parent_index_map[$parent_key])) {
                             $idx = $parent_index_map[$parent_key];
                             if (!isset($consolidated_links[$idx]['children'])) {
@@ -147,15 +150,53 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                             $consolidated_links[$idx]['children'][] = $link;
                             continue;
                         }
+
+                        // 2. Parent node does not exist: dynamically create main nav parent node
+                        $parent_label = is_array($parent_info)
+                            ? ($parent_info['label'] ?? ucfirst($parent_key))
+                            : ($link['parent_label'] ?? ucfirst($parent_key));
+
+                        $parent_icon = is_array($parent_info)
+                            ? ($parent_info['icon'] ?? ($link['parent_icon'] ?? 'fa-solid fa-folder'))
+                            : ($link['parent_icon'] ?? 'fa-solid fa-folder');
+
+                        $new_parent_node = [
+                            'label'    => $parent_label,
+                            'icon'     => $parent_icon,
+                            'children' => [$link]
+                        ];
+
+                        if (isset($link['permission'])) {
+                            // Don't restrict parent completely if other children might exist, but pass default if needed
+                        }
+
+                        $parent_idx = count($consolidated_links);
+                        $consolidated_links[] = $new_parent_node;
+
+                        $parent_index_map[$parent_key] = $parent_idx;
+                        $parent_index_map[strtolower(trim($parent_label))] = $parent_idx;
+                        continue;
                     }
 
                     // Top-level navigation node
                     $item_key = !empty($link['route']) ? strtolower($link['route']) : preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($link['label']));
-                    $link_idx = count($consolidated_links);
-                    $consolidated_links[] = $link;
 
-                    $parent_index_map[$item_key] = $link_idx;
-                    $parent_index_map[strtolower(trim($link['label']))] = $link_idx;
+                    if (isset($parent_index_map[$item_key])) {
+                        // Parent node was created dynamically earlier, merge properties
+                        $existing_idx = $parent_index_map[$item_key];
+                        $existing_children = $consolidated_links[$existing_idx]['children'] ?? [];
+                        if (!empty($link['children'])) {
+                            $existing_children = array_merge($existing_children, $link['children']);
+                        }
+                        $link['children'] = $existing_children;
+                        $consolidated_links[$existing_idx] = $link;
+                    } else {
+                        $link_idx = count($consolidated_links);
+                        $consolidated_links[] = $link;
+
+                        $parent_index_map[$item_key] = $link_idx;
+                        $parent_index_map[strtolower(trim($link['label']))] = $link_idx;
+                    }
                 }
 
                 $nav_config_json = get_setting('nav_menu_config', '{}');
@@ -197,6 +238,15 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                     }
 
                     if (!empty($link['children']) && is_array($link['children'])) {
+                        // Filter visible children based on individual permission checks
+                        $visible_children = array_filter($link['children'], function($child) {
+                            return !isset($child['permission']) || has_permission($child['permission']);
+                        });
+
+                        if (empty($visible_children)) {
+                            continue;
+                        }
+
                         // Render nested Bootstrap 5 Dropdown sub-menu
                         echo '<li class="nav-item dropdown">';
                         echo '<a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">';
@@ -207,10 +257,7 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                         echo '</a>';
                         echo '<ul class="dropdown-menu">';
 
-                        foreach ($link['children'] as $child) {
-                            if (isset($child['permission']) && !has_permission($child['permission'])) {
-                                continue;
-                            }
+                        foreach ($visible_children as $child) {
                             echo '<li>';
                             echo '<a class="dropdown-item" href="index.php?route=' . urlencode($child['route']) . '">';
                             if (isset($child['icon'])) {

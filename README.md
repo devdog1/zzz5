@@ -20,7 +20,7 @@ An elegant, extensible, enterprise-grade PHP/MySQL modular portal framework. Dev
    - [Outbound Email Delivery in Plugins](#outbound-email-delivery-in-plugins)
    - [Hook System (Actions & Filters)](#hook-system-actions--filters)
    - [Extensible Route Handlers & Views](#extensible-route-handlers--views)
-   - [Dynamic Navigation Menus (Top-Level & Dropdowns)](#dynamic-navigation-menus)
+   - [Dynamic Navigation Menus (Top-Level & Nested Dropdowns)](#dynamic-navigation-menus)
    - [Home Dashboard Widgets](#home-dashboard-widgets)
    - [Inter-Plugin Exposed Services](#inter-plugin-exposed-services)
    - [Dynamic Permission & Role Loading](#dynamic-permission--role-loading)
@@ -112,6 +112,7 @@ When upgrading the Portal Framework codebase across major or minor release versi
 ### Framework Changelog & Release History
 
 #### Version 1.1.0
+- **Flexible Nested Navigation Menu Registration**: Updated `header.php` so plugins can attach nested sub-menu items directly using a `parent` key (or `parent_label`/`parent_icon` / array format). If the specified parent main nav item exists, the sub-menu item is appended; if the parent menu item does not exist, it is created dynamically without requiring the plugin to register a dummy parent item.
 - **Plugin Multi-Version SQL Migrations**: Added support in `PluginManager` for checking header `Version:`, tracking `installed_version` in `active_plugins`, and automatically executing sequential versioned migration scripts located in `/plugins/{slug}/sql/migrations/` (e.g. `1.1.0.sql`, `2.0.0.sql`) alongside the `plugin_migrate_{slug}` hook.
 - **Outbound SMTP Email Delivery Engine (`Mailer.php`)**: Built native socket transport supporting Plain, STARTTLS, and SSL/TLS encryption, `AUTH LOGIN` authentication, Postfix Envelope From / Return-Path bounce header configuration (`email_envelope_from`), fallback to PHP native `mail()`, global helper function `send_email()`, and DB logging with SMTP DSN status code tracking (`email_logs`).
 - **Outbound Email Administration Panel (`admin-email.php`)**: Implemented SMTP settings configuration, test email modal dispatch, and real-time outbound message audit trail with status filters (Sent, Failed, Pending) and DSN codes.
@@ -339,6 +340,7 @@ Filters accept a variable, modify it, and return it.
 * **`theme_nav_links`**: Insert navigation items (top-level or dropdowns) to the header.
   ```php
   add_filter('theme_nav_links', function ($links) {
+      // 1. Full Top-Level Menu with Children
       $links[] = [
           'label' => 'On-Call Schedule',
           'icon'  => 'fa-solid fa-phone-volume',
@@ -348,6 +350,18 @@ Filters accept a variable, modify it, and return it.
               ['label' => 'Shift Trade Center', 'icon' => 'fa-solid fa-handshake', 'route' => 'oncall_trades']
           ]
       ];
+
+      // 2. Direct Nested Item Attachment (No pre-existing parent required!)
+      // If parent "On-Call Schedule" exists, attaches directly under it.
+      // If parent does not exist, the framework creates the main menu node automatically.
+      $links[] = [
+          'label'        => 'Override Management',
+          'icon'         => 'fa-solid fa-user-gear',
+          'route'        => 'oncall_overrides',
+          'parent'       => 'On-Call Schedule',      // Matches parent route or label
+          'parent_icon'  => 'fa-solid fa-phone-volume' // Optional parent icon fallback
+      ];
+
       return $links;
   });
   ```
@@ -378,7 +392,9 @@ Load `index.php?route=my_plugin_dashboard` to render this page inside the core t
 
 ### Dynamic Navigation Menus
 
-Plugins can register simple links or nested dropdown menus in `theme_nav_links`. Administrators can rearrange positions, rename labels, or hide links via the **Navigation Manager** (`admin-nav.php`).
+Plugins can register simple links, top-level menus with children, or attach individual nested sub-menu items dynamically using the `parent` attribute in `theme_nav_links`.
+
+If the parent navigation node exists, the nested item is appended to its dropdown menu. If the parent node does not exist, the framework automatically instantiates the parent main menu item. Administrators can rearrange positions, rename labels, or hide links via the **Navigation Manager** (`admin-nav.php`).
 
 ---
 
