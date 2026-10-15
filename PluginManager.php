@@ -90,6 +90,21 @@ class PluginManager
         $this->actions[$tag][$priority][] = $callback;
     }
 
+    public function removeAction($tag, $callback, $priority = 10)
+    {
+        if (!isset($this->actions[$tag][$priority])) {
+            return false;
+        }
+
+        foreach ($this->actions[$tag][$priority] as $index => $registeredCallback) {
+            if ($registeredCallback === $callback) {
+                unset($this->actions[$tag][$priority][$index]);
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function doAction($tag, ...$arg)
     {
         if (!isset($this->actions[$tag])) {
@@ -140,6 +155,21 @@ class PluginManager
             $this->filters[$tag] = [];
         }
         $this->filters[$tag][$priority][] = $callback;
+    }
+
+    public function removeFilter($tag, $callback, $priority = 10)
+    {
+        if (!isset($this->filters[$tag][$priority])) {
+            return false;
+        }
+
+        foreach ($this->filters[$tag][$priority] as $index => $registeredCallback) {
+            if ($registeredCallback === $callback) {
+                unset($this->filters[$tag][$priority][$index]);
+                return true;
+            }
+        }
+        return false;
     }
 
     public function applyFilters($tag, $value, ...$arg)
@@ -465,6 +495,7 @@ class PluginManager
             'author' => 'Anonymous',
             'requires_php' => '',
             'requires_core' => '',
+            'requires_plugins' => '',
             'permissions' => '',
             'roles' => ''
         ];
@@ -486,6 +517,9 @@ class PluginManager
         }
         if (preg_match('/Requires Core:\s*(.*)$/mi', $content, $matches)) {
             $meta['requires_core'] = trim($matches[1]);
+        }
+        if (preg_match('/Requires Plugins:\s*(.*)$/mi', $content, $matches)) {
+            $meta['requires_plugins'] = trim($matches[1]);
         }
         if (preg_match('/Permissions:\s*(.*)$/mi', $content, $matches)) {
             $meta['permissions'] = trim($matches[1]);
@@ -580,6 +614,34 @@ class PluginManager
                     'status' => 'pass',
                     'title' => 'Framework Core Compatible',
                     'message' => "Core requirement met (Requires >= {$meta['requires_core']}, active: {$coreVersion})."
+                ];
+            }
+        }
+
+        // 2c. Inter-Plugin Dependencies Requirement Check
+        if (!empty($meta['requires_plugins'])) {
+            $req_slugs = array_map('trim', explode(',', $meta['requires_plugins']));
+            $missing_deps = [];
+            foreach ($req_slugs as $req_slug) {
+                if (!empty($req_slug) && !$this->isPluginActive($req_slug)) {
+                    $missing_deps[] = $req_slug;
+                }
+            }
+
+            if (!empty($missing_deps)) {
+                $report['compatible'] = false;
+                $report['checks'][] = [
+                    'type' => 'plugin_dependencies',
+                    'status' => 'fail',
+                    'title' => 'Plugin Dependencies Missing',
+                    'message' => "Plugin requires active dependency module(s): " . implode(', ', $missing_deps)
+                ];
+            } else {
+                $report['checks'][] = [
+                    'type' => 'plugin_dependencies',
+                    'status' => 'pass',
+                    'title' => 'Plugin Dependencies Met',
+                    'message' => "All required dependency plugins are active (" . implode(', ', $req_slugs) . ")."
                 ];
             }
         }
@@ -804,6 +866,20 @@ class PluginManager
                 $coreVersion = function_exists('get_setting') ? get_setting('framework_version', '1.0.0') : '1.0.0';
                 if (version_compare($coreVersion, $meta['requires_core'], '<')) {
                     throw new Exception("Framework Core Incompatibility: Plugin requires Core {$meta['requires_core']} or higher.");
+                }
+            }
+
+            // Dependency plugins check
+            if (!empty($meta['requires_plugins'])) {
+                $req_slugs = array_map('trim', explode(',', $meta['requires_plugins']));
+                $missing = [];
+                foreach ($req_slugs as $rs) {
+                    if (!empty($rs) && !$this->isPluginActive($rs)) {
+                        $missing[] = $rs;
+                    }
+                }
+                if (!empty($missing)) {
+                    throw new Exception("Plugin Dependency Missing: Plugin requires active module(s): " . implode(', ', $missing));
                 }
             }
 

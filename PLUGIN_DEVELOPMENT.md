@@ -13,7 +13,7 @@ This guide details the architecture, standards, mandatory requirements, optional
 4. [Automated Schema Setup & Uninstall (`install.sql` / `uninstall.sql`)](#4-automated-schema-setup--uninstall-installsql--uninstallsql)
 5. [Plugin Versioning & SQL Migrations](#5-plugin-versioning--sql-migrations)
 6. [Outbound Email Delivery in Plugins](#6-outbound-email-delivery-in-plugins)
-7. [Hook System (Actions & Filters)](#7-hook-system-actions--filters)
+7. [Hook System (Actions, Filters & Hook Unbinding)](#7-hook-system-actions-filters--hook-unbinding)
 8. [Extensible Route Handlers & Views](#8-extensible-route-handlers--views)
 9. [Dynamic Navigation Menus (Top-Level & Nested Dropdowns)](#9-dynamic-navigation-menus)
 10. [Home Dashboard Widgets](#10-home-dashboard-widgets)
@@ -45,7 +45,7 @@ Extensions in this framework are fully self-contained. The platform automaticall
    - All POST routes MUST call `csrf_verify()` or `validate_csrf()`.
 
 ### Optional Capabilities
-- **PHP & Core Constraints**: Declaring `Requires PHP:` and `Requires Core:` version requirements in plugin headers.
+- **Dependencies & Version Requirements**: Declaring `Requires PHP:`, `Requires Core:`, and `Requires Plugins:` (comma-separated dependent plugin slugs) in headers.
 - **Models / Business Logic**: Splitting complex logic into separate model files (`/models/`).
 - **Views**: Separating HTML rendering into distinct view files (`/views/`).
 - **Background Tasks**: Registering scheduled jobs using `init_scheduler` (`/tasks/`).
@@ -90,7 +90,7 @@ Extensions in this framework are fully self-contained. The platform automaticall
 
 ## 3. Plugin Header Metadata
 
-Every plugin must start with a header block in `plugin.php`. Optional headers `Requires PHP:` and `Requires Core:` ensure compatibility checks pass before activation:
+Every plugin must start with a header block in `plugin.php`. Optional headers `Requires PHP:`, `Requires Core:`, and `Requires Plugins:` ensure environmental and module dependencies are verified before activation:
 
 ```php
 <?php
@@ -101,6 +101,7 @@ Every plugin must start with a header block in `plugin.php`. Optional headers `R
  * Author: DevDog
  * Requires PHP: 8.1
  * Requires Core: 1.1.0
+ * Requires Plugins: zabbix-connector, user-notifier
  * Permissions: view_schedule, manage_schedule, manage_trades, manage_settings
  * Roles: manager:view_schedule,manage_schedule,manage_trades,manage_settings; operator:view_schedule,manage_trades; viewer:view_schedule
  */
@@ -181,7 +182,7 @@ Key features for plugin emails:
 
 ---
 
-## 7. Hook System (Actions & Filters)
+## 7. Hook System (Actions, Filters & Hook Unbinding)
 
 ### Filters (Modify data arrays or strings)
 Filters accept a variable, modify it, and return it.
@@ -215,6 +216,14 @@ add_filter('theme_nav_links', function ($links) {
 ### Actions (Trigger output or side-effects)
 * **`theme_head`**: Inject custom stylesheets, meta tags, or CDN scripts into `<head>`.
 * **`theme_footer`**: Inject scripts before `</body>`.
+
+### Hook Unbinding API
+Plugins can unbind registered actions or filters using `remove_action()` and `remove_filter()`:
+```php
+// Unbind a previously attached action or filter callback
+remove_action('theme_footer', 'my_custom_footer_callback', 10);
+remove_filter('theme_nav_links', 'my_custom_nav_filter', 10);
+```
 
 ---
 
@@ -357,7 +366,7 @@ function my_plugin_sync_task() {
 Administrators can click **Check Compatibility** in `admin-plugins.php` before activating a plugin. The inspector dry-runs diagnostic checks:
 - PHP file syntax validation (with fallback token parser)
 - Entry file and directory structure inspection
-- `Requires PHP:` and `Requires Core:` dependency verification
+- `Requires PHP:`, `Requires Core:`, and `Requires Plugins:` dependency verification
 - Permission and role namespace collision detection
 - SQL schema statement prefixing verification (`plug_{plugin_slug}_*`)
 - Full report of expected changes (tables created, permissions registered, roles provisioned)

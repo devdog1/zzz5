@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [1.1.0] - 2025-02-15
 
 ### Added
+- **Inter-Plugin Dependency Management (`Requires Plugins:`)**: Added support in `PluginManager.php` for parsing `Requires Plugins:` header metadata. Verification checks in `inspectPlugin()` and `activatePlugin()` enforce that required dependent plugins are installed and active before a module can be activated.
+- **Hook Unbinding API (`remove_action` / `remove_filter`)**: Added `removeAction()` and `removeFilter()` methods in `PluginManager.php` and corresponding global wrapper functions in `functions.php` to allow plugins or core features to unbind previously registered callbacks.
 - **Plugin Header Requirements & Compatibility Engine**: Updated `PluginManager.php` to parse `Requires PHP:` and `Requires Core:` metadata headers in plugins. Added validation checks in both the compatibility inspector (`inspectPlugin`) and activation handler (`activatePlugin`) to block incompatible module activations.
 - **Automated Schema Activation & Purge Uninstallation**: Enhanced `PluginManager.php` to execute `sql/install.sql` automatically during plugin activation, and execute `sql/uninstall.sql` during deactivation when table purging is confirmed by an administrator.
 - **Plugin Multi-Version SQL Migrations**: Added support in `PluginManager` for checking header `Version:`, tracking `installed_version` in `active_plugins`, and automatically executing sequential versioned migration scripts located in `/plugins/{slug}/sql/migrations/` (e.g. `1.1.0.sql`, `2.0.0.sql`) alongside the `plugin_migrate_{slug}` hook.

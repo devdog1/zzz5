@@ -118,8 +118,16 @@ function add_action($hook, $callback, $priority = 10) {
     PluginManager::getInstance()->addAction($hook, $callback, $priority);
 }
 
+function remove_action($hook, $callback, $priority = 10) {
+    return PluginManager::getInstance()->removeAction($hook, $callback, $priority);
+}
+
 function add_filter($hook, $callback, $priority = 10) {
     PluginManager::getInstance()->addFilter($hook, $callback, $priority);
+}
+
+function remove_filter($hook, $callback, $priority = 10) {
+    return PluginManager::getInstance()->removeFilter($hook, $callback, $priority);
 }
 
 function register_route($route_name, $callback) {
