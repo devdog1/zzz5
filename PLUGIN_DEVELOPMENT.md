@@ -10,18 +10,19 @@ This guide details the architecture, standards, mandatory requirements, optional
    - [Optional Capabilities](#optional-capabilities)
 2. [Folder Structure Requirements](#2-folder-structure-requirements)
 3. [Plugin Header Metadata](#3-plugin-header-metadata)
-4. [Plugin Versioning & SQL Migrations](#4-plugin-versioning--sql-migrations)
-5. [Outbound Email Delivery in Plugins](#5-outbound-email-delivery-in-plugins)
-6. [Hook System (Actions & Filters)](#6-hook-system-actions--filters)
-7. [Extensible Route Handlers & Views](#7-extensible-route-handlers--views)
-8. [Dynamic Navigation Menus (Top-Level & Nested Dropdowns)](#8-dynamic-navigation-menus)
-9. [Home Dashboard Widgets](#9-home-dashboard-widgets)
-10. [Inter-Plugin Exposed Services](#10-inter-plugin-exposed-services)
-11. [Dynamic Permission & Role Loading](#11-dynamic-permission--role-loading)
-12. [Database Isolation & SQL Prefixing](#12-database-isolation--sql-prefixing)
-13. [Plugin Settings API](#13-plugin-settings-api)
-14. [Task Scheduler API](#14-task-scheduler-api)
-15. [Verbose Plugin Compatibility Inspector](#15-verbose-plugin-compatibility-inspector)
+4. [Automated Schema Setup & Uninstall (`install.sql` / `uninstall.sql`)](#4-automated-schema-setup--uninstall-installsql--uninstallsql)
+5. [Plugin Versioning & SQL Migrations](#5-plugin-versioning--sql-migrations)
+6. [Outbound Email Delivery in Plugins](#6-outbound-email-delivery-in-plugins)
+7. [Hook System (Actions & Filters)](#7-hook-system-actions--filters)
+8. [Extensible Route Handlers & Views](#8-extensible-route-handlers--views)
+9. [Dynamic Navigation Menus (Top-Level & Nested Dropdowns)](#9-dynamic-navigation-menus)
+10. [Home Dashboard Widgets](#10-home-dashboard-widgets)
+11. [Inter-Plugin Exposed Services](#11-inter-plugin-exposed-services)
+12. [Dynamic Permission & Role Loading](#12-dynamic-permission--role-loading)
+13. [Database Isolation & SQL Prefixing](#13-database-isolation--sql-prefixing)
+14. [Plugin Settings API](#14-plugin-settings-api)
+15. [Task Scheduler API](#15-task-scheduler-api)
+16. [Verbose Plugin Compatibility Inspector](#16-verbose-plugin-compatibility-inspector)
 
 ---
 
@@ -44,6 +45,7 @@ Extensions in this framework are fully self-contained. The platform automaticall
    - All POST routes MUST call `csrf_verify()` or `validate_csrf()`.
 
 ### Optional Capabilities
+- **PHP & Core Constraints**: Declaring `Requires PHP:` and `Requires Core:` version requirements in plugin headers.
 - **Models / Business Logic**: Splitting complex logic into separate model files (`/models/`).
 - **Views**: Separating HTML rendering into distinct view files (`/views/`).
 - **Background Tasks**: Registering scheduled jobs using `init_scheduler` (`/tasks/`).
@@ -76,7 +78,7 @@ Extensions in this framework are fully self-contained. The platform automaticall
   │
   ├── /sql/                        <-- OPTIONAL: Automated DB schema & migration scripts
   │     ├── install.sql            <-- Executed automatically on plugin activation
-  │     ├── uninstall.sql          <-- Executed automatically on plugin deactivation
+  │     ├── uninstall.sql          <-- Executed automatically on plugin deactivation (when purge selected)
   │     └── /migrations/           <-- Versioned SQL migration scripts (e.g., 1.1.0.sql, 2.0.0.sql)
   │
   └── /assets/                     <-- OPTIONAL: Static frontend CSS, JS, images
@@ -88,7 +90,7 @@ Extensions in this framework are fully self-contained. The platform automaticall
 
 ## 3. Plugin Header Metadata
 
-Every plugin must start with a header block in `plugin.php`:
+Every plugin must start with a header block in `plugin.php`. Optional headers `Requires PHP:` and `Requires Core:` ensure compatibility checks pass before activation:
 
 ```php
 <?php
@@ -97,6 +99,8 @@ Every plugin must start with a header block in `plugin.php`:
  * Description: Enterprise On-Call Rotation, Shift Trade Center, and Zabbix Integration.
  * Version: 2.1.0
  * Author: DevDog
+ * Requires PHP: 8.1
+ * Requires Core: 1.1.0
  * Permissions: view_schedule, manage_schedule, manage_trades, manage_settings
  * Roles: manager:view_schedule,manage_schedule,manage_trades,manage_settings; operator:view_schedule,manage_trades; viewer:view_schedule
  */
@@ -108,7 +112,29 @@ if (!defined('APP_ROOT')) {
 
 ---
 
-## 4. Plugin Versioning & SQL Migrations
+## 4. Automated Schema Setup & Uninstall (`install.sql` / `uninstall.sql`)
+
+Plugins can provide automated database table creation and cleanup scripts inside `/sql/`:
+
+* **`install.sql`**: Executed automatically by `PluginManager::activatePlugin()` during plugin activation. Uses `{prefix}` as a placeholder for `plug_{plugin_slug}_`.
+  ```sql
+  CREATE TABLE IF NOT EXISTS `{prefix}rotations` (
+      `id` INT AUTO_INCREMENT PRIMARY KEY,
+      `user_id` INT NOT NULL,
+      `shift_start` DATETIME NOT NULL,
+      `shift_end` DATETIME NOT NULL,
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+  ```
+
+* **`uninstall.sql`**: Executed automatically by `PluginManager::deactivatePlugin()` when the administrator selects "Purge Database Tables" upon deactivation.
+  ```sql
+  DROP TABLE IF EXISTS `{prefix}rotations`;
+  ```
+
+---
+
+## 5. Plugin Versioning & SQL Migrations
 
 Plugins declare a semantic version number in their `Version:` header (e.g. `Version: 1.2.0`). The core framework tracks installed plugin versions in the `active_plugins` table (`installed_version` column).
 
@@ -128,7 +154,7 @@ When a plugin is updated on disk with a higher version number, `PluginManager::b
 
 ---
 
-## 5. Outbound Email Delivery in Plugins
+## 6. Outbound Email Delivery in Plugins
 
 Plugins can send transactional email notifications using the `send_email()` helper function:
 
@@ -155,7 +181,7 @@ Key features for plugin emails:
 
 ---
 
-## 6. Hook System (Actions & Filters)
+## 7. Hook System (Actions & Filters)
 
 ### Filters (Modify data arrays or strings)
 Filters accept a variable, modify it, and return it.
@@ -192,7 +218,7 @@ add_filter('theme_nav_links', function ($links) {
 
 ---
 
-## 7. Extensible Route Handlers & Views
+## 8. Extensible Route Handlers & Views
 
 ```php
 add_action('register_routes', function() {
@@ -208,7 +234,7 @@ add_action('register_routes', function() {
 
 ---
 
-## 8. Dynamic Navigation Menus
+## 9. Dynamic Navigation Menus
 
 Plugins can register simple links, top-level menus with children, or attach individual nested sub-menu items dynamically using the `parent` attribute in `theme_nav_links`.
 
@@ -216,7 +242,7 @@ If the parent navigation node exists, the nested item is appended to its dropdow
 
 ---
 
-## 9. Home Dashboard Widgets
+## 10. Home Dashboard Widgets
 
 Plugins can render contextual widget cards on the home dashboard (`index.php`). The framework passes the authenticated user's context array:
 
@@ -235,7 +261,7 @@ add_action('index_dashboard_widgets', function($userContext) {
 
 ---
 
-## 10. Inter-Plugin Exposed Services
+## 11. Inter-Plugin Exposed Services
 
 ```php
 // Register service in Plugin A
@@ -258,7 +284,7 @@ try {
 
 ---
 
-## 11. Dynamic Permission & Role Loading
+## 12. Dynamic Permission & Role Loading
 
 When a plugin is activated, `PluginManager` parses the `Permissions:` and `Roles:` headers:
 - Permissions listed are automatically registered into the DB permissions directory with the `{plugin_slug}_` prefix.
@@ -267,7 +293,7 @@ When a plugin is activated, `PluginManager` parses the `Permissions:` and `Roles
 
 ---
 
-## 12. Database Isolation & SQL Prefixing
+## 13. Database Isolation & SQL Prefixing
 
 Plugins MUST use `PluginDatabase.php` for isolated database access inside the `plug_{plugin_slug}_` namespace:
 
@@ -291,7 +317,7 @@ $rows = $pdb->query("SELECT * FROM {$tb}")->fetchAll();
 
 ---
 
-## 13. Plugin Settings API
+## 14. Plugin Settings API
 
 Plugins can store and retrieve isolated settings using standard helper functions:
 
@@ -305,7 +331,7 @@ $apiKey = get_plugin_setting('my-plugin', 'api_key', 'default_value');
 
 ---
 
-## 14. Task Scheduler API
+## 15. Task Scheduler API
 
 Register background jobs executing at interval or fixed weekly schedules:
 
@@ -326,11 +352,12 @@ function my_plugin_sync_task() {
 
 ---
 
-## 15. Verbose Plugin Compatibility Inspector
+## 16. Verbose Plugin Compatibility Inspector
 
 Administrators can click **Check Compatibility** in `admin-plugins.php` before activating a plugin. The inspector dry-runs diagnostic checks:
 - PHP file syntax validation (with fallback token parser)
 - Entry file and directory structure inspection
+- `Requires PHP:` and `Requires Core:` dependency verification
 - Permission and role namespace collision detection
 - SQL schema statement prefixing verification (`plug_{plugin_slug}_*`)
 - Full report of expected changes (tables created, permissions registered, roles provisioned)

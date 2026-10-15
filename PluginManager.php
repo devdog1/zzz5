@@ -463,6 +463,8 @@ class PluginManager
             'description' => 'No description provided.',
             'version' => '1.0.0',
             'author' => 'Anonymous',
+            'requires_php' => '',
+            'requires_core' => '',
             'permissions' => '',
             'roles' => ''
         ];
@@ -478,6 +480,12 @@ class PluginManager
         }
         if (preg_match('/Author:\s*(.*)$/mi', $content, $matches)) {
             $meta['author'] = trim($matches[1]);
+        }
+        if (preg_match('/Requires PHP:\s*(.*)$/mi', $content, $matches)) {
+            $meta['requires_php'] = trim($matches[1]);
+        }
+        if (preg_match('/Requires Core:\s*(.*)$/mi', $content, $matches)) {
+            $meta['requires_core'] = trim($matches[1]);
         }
         if (preg_match('/Permissions:\s*(.*)$/mi', $content, $matches)) {
             $meta['permissions'] = trim($matches[1]);
@@ -534,6 +542,47 @@ class PluginManager
         // 2. Metadata parsing
         $meta = $this->parsePluginHeader($pluginFile);
         $report['meta'] = $meta;
+
+        // 2a. PHP Version Requirement Check
+        if (!empty($meta['requires_php'])) {
+            if (version_compare(PHP_VERSION, $meta['requires_php'], '<')) {
+                $report['compatible'] = false;
+                $report['checks'][] = [
+                    'type' => 'php_version',
+                    'status' => 'fail',
+                    'title' => 'PHP Version Requirement Unmet',
+                    'message' => "Plugin requires PHP version {$meta['requires_php']} or higher (active PHP: " . PHP_VERSION . ")."
+                ];
+            } else {
+                $report['checks'][] = [
+                    'type' => 'php_version',
+                    'status' => 'pass',
+                    'title' => 'PHP Version Compatible',
+                    'message' => "PHP requirement met (Requires >= {$meta['requires_php']}, active: " . PHP_VERSION . ")."
+                ];
+            }
+        }
+
+        // 2b. Framework Core Version Requirement Check
+        if (!empty($meta['requires_core'])) {
+            $coreVersion = function_exists('get_setting') ? get_setting('framework_version', '1.0.0') : '1.0.0';
+            if (version_compare($coreVersion, $meta['requires_core'], '<')) {
+                $report['compatible'] = false;
+                $report['checks'][] = [
+                    'type' => 'core_version',
+                    'status' => 'fail',
+                    'title' => 'Framework Core Requirement Unmet',
+                    'message' => "Plugin requires Framework Core version {$meta['requires_core']} or higher (active Core: {$coreVersion})."
+                ];
+            } else {
+                $report['checks'][] = [
+                    'type' => 'core_version',
+                    'status' => 'pass',
+                    'title' => 'Framework Core Compatible',
+                    'message' => "Core requirement met (Requires >= {$meta['requires_core']}, active: {$coreVersion})."
+                ];
+            }
+        }
 
         $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
         $required_prefix = $clean_slug . '_';
@@ -739,16 +788,38 @@ class PluginManager
         try {
             // Find and parse plugin metadata headers
             $pluginsDir = __DIR__ . '/plugins';
-            $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
+            $pluginDir = $pluginsDir . '/' . $slug;
+            $pluginFile = $pluginDir . '/plugin.php';
             if (!file_exists($pluginFile)) {
                 throw new Exception("Plugin file not found: " . $pluginFile);
             }
 
             $meta = $this->parsePluginHeader($pluginFile);
+
+            // Version requirement checks
+            if (!empty($meta['requires_php']) && version_compare(PHP_VERSION, $meta['requires_php'], '<')) {
+                throw new Exception("PHP Version Incompatibility: Plugin requires PHP {$meta['requires_php']} or higher.");
+            }
+            if (!empty($meta['requires_core'])) {
+                $coreVersion = function_exists('get_setting') ? get_setting('framework_version', '1.0.0') : '1.0.0';
+                if (version_compare($coreVersion, $meta['requires_core'], '<')) {
+                    throw new Exception("Framework Core Incompatibility: Plugin requires Core {$meta['requires_core']} or higher.");
+                }
+            }
+
             $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
             $required_prefix = $clean_slug . '_';
 
-            // 1. Dynamically load, validate, prefix, and register permissions to DB
+            // 1. Automatically execute install.sql if present
+            $install_sql_file = $pluginDir . '/sql/install.sql';
+            if (file_exists($install_sql_file)) {
+                $sql = file_get_contents($install_sql_file);
+                $expected_prefix = 'plug_' . $clean_slug . '_';
+                $sql = str_replace('{prefix}', $expected_prefix, $sql);
+                $db->exec($sql);
+            }
+
+            // 2. Dynamically load, validate, prefix, and register permissions to DB
             $provisioned_perms = [];
             if (!empty($meta['permissions'])) {
                 $perm_list = array_map('trim', explode(',', $meta['permissions']));
@@ -774,7 +845,7 @@ class PluginManager
                 }
             }
 
-            // 2. Dynamically load, prefix, and register custom Roles and assign their permissions
+            // 3. Dynamically load, prefix, and register custom Roles and assign their permissions
             if (!empty($meta['roles'])) {
                 // Format example: role_name:perm1,perm2; role_name2:perm3
                 $roles_list = array_map('trim', explode(';', $meta['roles']));
@@ -868,13 +939,25 @@ class PluginManager
         try {
             // Find and parse plugin metadata headers
             $pluginsDir = __DIR__ . '/plugins';
-            $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
+            $pluginDir = $pluginsDir . '/' . $slug;
+            $pluginFile = $pluginDir . '/plugin.php';
             if (file_exists($pluginFile)) {
                 $meta = $this->parsePluginHeader($pluginFile);
                 $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
                 $required_prefix = $clean_slug . '_';
 
-                // 1. Drop associated custom Roles & Role-permissions linkage
+                // 1. Automatically execute uninstall.sql if purge_tables is requested
+                if ($purge_tables) {
+                    $uninstall_sql_file = $pluginDir . '/sql/uninstall.sql';
+                    if (file_exists($uninstall_sql_file)) {
+                        $sql = file_get_contents($uninstall_sql_file);
+                        $expected_prefix = 'plug_' . $clean_slug . '_';
+                        $sql = str_replace('{prefix}', $expected_prefix, $sql);
+                        $db->exec($sql);
+                    }
+                }
+
+                // 2. Drop associated custom Roles & Role-permissions linkage
                 if (!empty($meta['roles'])) {
                     $roles_list = array_map('trim', explode(';', $meta['roles']));
                     foreach ($roles_list as $role_expr) {
@@ -892,7 +975,7 @@ class PluginManager
                     }
                 }
 
-                // 2. Dynamically clean up / remove permissions on deactivation
+                // 3. Dynamically clean up / remove permissions on deactivation
                 if (!empty($meta['permissions'])) {
                     $perm_list = array_map('trim', explode(',', $meta['permissions']));
 
