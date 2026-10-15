@@ -5,6 +5,7 @@
 
 <!-- Action Hook for custom plugin footer scripts -->
 <?php $pluginManager->doAction('theme_footer'); ?>
+<?php $pluginManager->renderEnqueuedScripts(true); ?>
 
 </body>
 </html>

@@ -84,6 +84,17 @@ function e($string) {
 }
 
 /**
+ * Translation / i18n lookup wrapper function.
+ *
+ * @param string $text Message string to translate
+ * @param string $domain Text domain slug (default: 'default')
+ * @return string Translated text or original string fallback
+ */
+function __($text, $domain = 'default') {
+    return PluginManager::getInstance()->translate($text, $domain);
+}
+
+/**
  * Set a flash message to display to the user on the next page load.
  *
  * @param string $type Message category (success, danger, warning, info)
@@ -111,6 +122,38 @@ function get_flash_messages() {
 }
 
 /* =========================================================
+ * ASSET ENQUEUING WRAPPERS
+ * ========================================================= */
+
+function enqueue_script($handle, $src, array $deps = [], $ver = false, $in_footer = true) {
+    PluginManager::getInstance()->enqueueScript($handle, $src, $deps, $ver, $in_footer);
+}
+
+function enqueue_style($handle, $src, array $deps = [], $ver = false, $media = 'all') {
+    PluginManager::getInstance()->enqueueStyle($handle, $src, $deps, $ver, $media);
+}
+
+/* =========================================================
+ * ASYNCHRONOUS / SYNCHRONOUS EVENT BUS API WRAPPERS
+ * ========================================================= */
+
+function add_event_listener($event_name, $callback, $priority = 10) {
+    PluginManager::getInstance()->addEventListener($event_name, $callback, $priority);
+}
+
+function dispatch_event($event_name, array $payload = [], $async = false) {
+    return PluginManager::getInstance()->dispatchEvent($event_name, $payload, $async);
+}
+
+/* =========================================================
+ * REST API ROUTER WRAPPER
+ * ========================================================= */
+
+function register_api_route($endpoint, $method, $callback, $permission = null) {
+    PluginManager::getInstance()->registerApiRoute($endpoint, $method, $callback, $permission);
+}
+
+/* =========================================================
  * PLUGIN & HOOK HELPER WRAPPERS
  * ========================================================= */
 
@@ -118,8 +161,16 @@ function add_action($hook, $callback, $priority = 10) {
     PluginManager::getInstance()->addAction($hook, $callback, $priority);
 }
 
+function remove_action($hook, $callback, $priority = 10) {
+    return PluginManager::getInstance()->removeAction($hook, $callback, $priority);
+}
+
 function add_filter($hook, $callback, $priority = 10) {
     PluginManager::getInstance()->addFilter($hook, $callback, $priority);
+}
+
+function remove_filter($hook, $callback, $priority = 10) {
+    return PluginManager::getInstance()->removeFilter($hook, $callback, $priority);
 }
 
 function register_route($route_name, $callback) {
