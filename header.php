@@ -101,6 +101,11 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                                 <i class="fa-solid fa-stethoscope me-2 text-danger"></i> System Diagnostics
                             </a>
                         </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-changelog.php') ? 'active' : '' ?>" href="admin-changelog.php">
+                                <i class="fa-solid fa-clock-rotate-left me-2 text-primary"></i> Framework Changelog
+                            </a>
+                        </li>
                     <?php endif; ?>
                 </ul>
             </li>
