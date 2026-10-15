@@ -9,6 +9,10 @@ class PluginManager
     private $filters = [];
     private $routes = [];
     private $services = []; // Inter-Plugin Shared Service Registry
+    private $events = [];   // Event Bus Registry
+    private $enqueuedScripts = []; // Enqueued Scripts Queue
+    private $enqueuedStyles = [];  // Enqueued Styles Queue
+    private $translations = [];    // Language Dictionaries
     private $activePlugins = [];
     private $pluginMeta = [];
     private $pluginErrors = [];
@@ -24,6 +28,137 @@ class PluginManager
             self::$instance = new self();
         }
         return self::$instance;
+    }
+
+    /* =========================================================
+     * ASSET QUEUEING API (CSS & JS Enqueuing)
+     * ========================================================= */
+
+    public function enqueueScript($handle, $src, array $deps = [], $ver = false, $inFooter = true)
+    {
+        $this->enqueuedScripts[$handle] = [
+            'src' => $src,
+            'deps' => $deps,
+            'ver' => $ver,
+            'in_footer' => (bool)$inFooter
+        ];
+    }
+
+    public function enqueueStyle($handle, $src, array $deps = [], $ver = false, $media = 'all')
+    {
+        $this->enqueuedStyles[$handle] = [
+            'src' => $src,
+            'deps' => $deps,
+            'ver' => $ver,
+            'media' => $media
+        ];
+    }
+
+    public function renderEnqueuedStyles()
+    {
+        foreach ($this->enqueuedStyles as $handle => $style) {
+            $verStr = $style['ver'] ? '?v=' . urlencode($style['ver']) : '';
+            $url = htmlspecialchars($style['src'] . $verStr);
+            $media = htmlspecialchars($style['media']);
+            echo "<link rel=\"stylesheet\" id=\"{$handle}-css\" href=\"{$url}\" media=\"{$media}\">\n";
+        }
+    }
+
+    public function renderEnqueuedScripts($inFooterLocation = true)
+    {
+        foreach ($this->enqueuedScripts as $handle => $script) {
+            if ($script['in_footer'] === $inFooterLocation) {
+                $verStr = $script['ver'] ? '?v=' . urlencode($script['ver']) : '';
+                $url = htmlspecialchars($script['src'] . $verStr);
+                echo "<script id=\"{$handle}-js\" src=\"{$url}\"></script>\n";
+            }
+        }
+    }
+
+    /* =========================================================
+     * TRANSLATION & I18N API
+     * ========================================================= */
+
+    public function loadTextDomain($domain, $langDir = null)
+    {
+        $lang = get_setting('site_language', 'en_US');
+        if (empty($langDir)) {
+            $langDir = __DIR__ . '/languages';
+        }
+
+        $file = rtrim($langDir, '/') . "/{$domain}-{$lang}.json";
+        if (file_exists($file)) {
+            $json = file_get_contents($file);
+            $data = json_decode($json, true);
+            if (is_array($data)) {
+                if (!isset($this->translations[$domain])) {
+                    $this->translations[$domain] = [];
+                }
+                $this->translations[$domain] = array_merge($this->translations[$domain], $data);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public function translate($text, $domain = 'default')
+    {
+        if (isset($this->translations[$domain][$text])) {
+            return $this->translations[$domain][$text];
+        }
+        return $text;
+    }
+
+    /* =========================================================
+     * ASYNCHRONOUS / SYNCHRONOUS EVENT BUS API
+     * ========================================================= */
+
+    public function addEventListener($eventName, $callback, $priority = 10)
+    {
+        if (!isset($this->events[$eventName])) {
+            $this->events[$eventName] = [];
+        }
+        $this->events[$eventName][$priority][] = $callback;
+    }
+
+    public function dispatchEvent($eventName, array $payload = [], $async = false)
+    {
+        if ($async) {
+            // Queue event in DB event bus queue table for background CLI worker execution
+            try {
+                $db = get_db_connection();
+                $stmt = $db->prepare("
+                    INSERT INTO event_queue (event_name, payload, status, created_at)
+                    VALUES (?, ?, 'pending', NOW())
+                ");
+                $stmt->execute([$eventName, json_encode($payload)]);
+                if (function_exists('log_action')) {
+                    log_action('EVENT_DISPATCHED_ASYNC', ['event' => $eventName]);
+                }
+                return true;
+            } catch (Throwable $t) {
+                error_log("Failed to queue async event [{$eventName}]: " . $t->getMessage());
+            }
+        }
+
+        // Synchronous event dispatch
+        if (!isset($this->events[$eventName])) {
+            return false;
+        }
+
+        $priorities = $this->events[$eventName];
+        ksort($priorities);
+
+        foreach ($priorities as $priority => $callbacks) {
+            foreach ($callbacks as $callback) {
+                try {
+                    call_user_func($callback, $payload);
+                } catch (Throwable $t) {
+                    error_log("Error executing event listener [{$eventName}]: " . $t->getMessage());
+                }
+            }
+        }
+        return true;
     }
 
     /* =========================================================
@@ -90,6 +225,21 @@ class PluginManager
         $this->actions[$tag][$priority][] = $callback;
     }
 
+    public function removeAction($tag, $callback, $priority = 10)
+    {
+        if (!isset($this->actions[$tag][$priority])) {
+            return false;
+        }
+
+        foreach ($this->actions[$tag][$priority] as $index => $registeredCallback) {
+            if ($registeredCallback === $callback) {
+                unset($this->actions[$tag][$priority][$index]);
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function doAction($tag, ...$arg)
     {
         if (!isset($this->actions[$tag])) {
@@ -140,6 +290,21 @@ class PluginManager
             $this->filters[$tag] = [];
         }
         $this->filters[$tag][$priority][] = $callback;
+    }
+
+    public function removeFilter($tag, $callback, $priority = 10)
+    {
+        if (!isset($this->filters[$tag][$priority])) {
+            return false;
+        }
+
+        foreach ($this->filters[$tag][$priority] as $index => $registeredCallback) {
+            if ($registeredCallback === $callback) {
+                unset($this->filters[$tag][$priority][$index]);
+                return true;
+            }
+        }
+        return false;
     }
 
     public function applyFilters($tag, $value, ...$arg)
@@ -248,16 +413,65 @@ class PluginManager
     }
 
     /* =========================================================
-     * EXTENSIBLE ROUTING
+     * EXTENSIBLE ROUTING & REST API ROUTER
      * ========================================================= */
     public function registerRoute($route, $callback)
     {
         $this->routes[$route] = $callback;
     }
 
+    /**
+     * Register a dedicated REST API endpoint route.
+     *
+     * @param string $endpoint Path, e.g. "api/v1/oncall/shift"
+     * @param string $method HTTP method e.g. "GET", "POST"
+     * @param callable $callback Handler callback returning array data
+     * @param string|null $permission Required permission check or null for public
+     */
+    public function registerApiRoute($endpoint, $method, $callback, $permission = null)
+    {
+        $routeKey = strtoupper($method) . ':' . ltrim($endpoint, '/');
+        $this->routes[$routeKey] = [
+            'type' => 'api',
+            'method' => strtoupper($method),
+            'endpoint' => ltrim($endpoint, '/'),
+            'callback' => $callback,
+            'permission' => $permission
+        ];
+    }
+
     public function handleRoute($route)
     {
-        if (isset($this->routes[$route])) {
+        $httpMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        $apiRouteKey = strtoupper($httpMethod) . ':' . ltrim($route, '/');
+
+        // 1. Handle REST API Endpoint Route
+        if (isset($this->routes[$apiRouteKey]) && is_array($this->routes[$apiRouteKey]) && isset($this->routes[$apiRouteKey]['type']) && $this->routes[$apiRouteKey]['type'] === 'api') {
+            $apiDef = $this->routes[$apiRouteKey];
+            header('Content-Type: application/json');
+
+            if (!empty($apiDef['permission']) && !has_permission($apiDef['permission'])) {
+                http_response_code(403);
+                echo json_encode(['error' => 'Forbidden: Insufficient permissions to access REST API endpoint.']);
+                return true;
+            }
+
+            try {
+                $rawInput = file_get_contents('php://input');
+                $jsonData = json_decode($rawInput, true) ?: [];
+                $requestParams = array_merge($_GET, $_POST, $jsonData);
+
+                $response = call_user_func($apiDef['callback'], $requestParams);
+                echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            } catch (Throwable $t) {
+                http_response_code(500);
+                echo json_encode(['error' => 'REST API Exception: ' . $t->getMessage()]);
+            }
+            return true;
+        }
+
+        // 2. Handle HTML View Route Handler
+        if (isset($this->routes[$route]) && is_callable($this->routes[$route])) {
             // SANDBOX SHIELD: Wrap plugin route handlers in try/catch block
             try {
                 call_user_func($this->routes[$route]);
@@ -271,6 +485,7 @@ class PluginManager
             }
             return true;
         }
+
         return false;
     }
 
@@ -291,6 +506,127 @@ class PluginManager
         } catch (Exception $e) {
             $this->activePlugins = [];
         }
+    }
+
+    /**
+     * Retrieve the currently installed DB version of a plugin.
+     *
+     * @param string $slug
+     * @return string|null
+     */
+    public function getInstalledPluginVersion($slug)
+    {
+        try {
+            $db = get_db_connection();
+            // Check if installed_version column exists
+            $stmt = $db->prepare("SELECT installed_version FROM active_plugins WHERE plugin_slug = ?");
+            $stmt->execute([$slug]);
+            $row = $stmt->fetch();
+            return $row ? ($row['installed_version'] ?? '1.0.0') : null;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Run version migrations for an active plugin if its disk version is newer than installed_version in DB.
+     * Supports sequential multi-version SQL migrations in plugins/{slug}/sql/migrations/ (e.g. 1.1.0.sql, 2.0.0.sql)
+     * as well as the 'plugin_migrate_{slug}' action hook.
+     *
+     * @param string $slug
+     * @param string $currentVersion Disk version from plugin header
+     * @param string|null $installedVersion Currently installed DB version
+     */
+    public function migratePlugin($slug, $currentVersion, $installedVersion = null)
+    {
+        if (empty($currentVersion)) return;
+
+        if ($installedVersion === null) {
+            $installedVersion = $this->getInstalledPluginVersion($slug);
+        }
+
+        if (empty($installedVersion)) {
+            $installedVersion = '1.0.0';
+        }
+
+        // Check if current disk version is newer than installed version
+        if (version_compare($currentVersion, $installedVersion, '>')) {
+            $pluginsDir = __DIR__ . '/plugins';
+            $pluginDir = $pluginsDir . '/' . $slug;
+            $migrationsDir = $pluginDir . '/sql/migrations';
+
+            $db = get_db_connection();
+
+            // 1. Look for SQL migration files in plugins/{slug}/sql/migrations/
+            if (is_dir($migrationsDir)) {
+                $files = scandir($migrationsDir);
+                $migrationFiles = [];
+
+                foreach ($files as $file) {
+                    if ($file === '.' || $file === '..') continue;
+                    if (pathinfo($file, PATHINFO_EXTENSION) === 'sql') {
+                        $migVersion = pathinfo($file, PATHINFO_FILENAME);
+                        // Filter migration files that are > $installedVersion and <= $currentVersion
+                        if (version_compare($migVersion, $installedVersion, '>') && version_compare($migVersion, $currentVersion, '<=')) {
+                            $migrationFiles[$migVersion] = $migrationsDir . '/' . $file;
+                        }
+                    }
+                }
+
+                // Sort migration files sequentially by version ASC
+                uksort($migrationFiles, 'version_compare');
+
+                foreach ($migrationFiles as $mVer => $mFile) {
+                    try {
+                        $sql = file_get_contents($mFile);
+                        $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
+                        $expected_prefix = 'plug_' . $clean_slug . '_';
+                        $sql = str_replace('{prefix}', $expected_prefix, $sql);
+
+                        $db->exec($sql);
+
+                        // Update DB installed_version after each successful migration step
+                        $stmt = $db->prepare("UPDATE active_plugins SET installed_version = ? WHERE plugin_slug = ?");
+                        $stmt->execute([$mVer, $slug]);
+
+                        if (function_exists('log_action')) {
+                            log_action('PLUGIN_MIGRATION_STEP_SUCCESS', [
+                                'slug' => $slug,
+                                'migrated_to_version' => $mVer,
+                                'file' => basename($mFile)
+                            ]);
+                        }
+                    } catch (Throwable $t) {
+                        $err = "Migration failed for plugin '{$slug}' at version {$mVer}: " . $t->getMessage();
+                        error_log($err);
+                        if (function_exists('log_action')) {
+                            log_action('PLUGIN_MIGRATION_ERROR', ['slug' => $slug, 'version' => $mVer, 'error' => $err]);
+                        }
+                        return false; // Stop further migrations if a step fails
+                    }
+                }
+            }
+
+            // 2. Trigger custom migration action hook
+            $this->doAction("plugin_migrate_{$slug}", $installedVersion, $currentVersion);
+
+            // 3. Finalize installed version in DB to current disk version
+            try {
+                $stmt = $db->prepare("UPDATE active_plugins SET installed_version = ? WHERE plugin_slug = ?");
+                $stmt->execute([$currentVersion, $slug]);
+                if (function_exists('log_action')) {
+                    log_action('PLUGIN_MIGRATED_SUCCESS', [
+                        'slug' => $slug,
+                        'from_version' => $installedVersion,
+                        'to_version' => $currentVersion
+                    ]);
+                }
+            } catch (Throwable $t) {
+                error_log("Failed to update installed_version for plugin {$slug}: " . $t->getMessage());
+            }
+        }
+
+        return true;
     }
 
     public function getActivePlugins()
@@ -342,6 +678,9 @@ class PluginManager
             'description' => 'No description provided.',
             'version' => '1.0.0',
             'author' => 'Anonymous',
+            'requires_php' => '',
+            'requires_core' => '',
+            'requires_plugins' => '',
             'permissions' => '',
             'roles' => ''
         ];
@@ -357,6 +696,15 @@ class PluginManager
         }
         if (preg_match('/Author:\s*(.*)$/mi', $content, $matches)) {
             $meta['author'] = trim($matches[1]);
+        }
+        if (preg_match('/Requires PHP:\s*(.*)$/mi', $content, $matches)) {
+            $meta['requires_php'] = trim($matches[1]);
+        }
+        if (preg_match('/Requires Core:\s*(.*)$/mi', $content, $matches)) {
+            $meta['requires_core'] = trim($matches[1]);
+        }
+        if (preg_match('/Requires Plugins:\s*(.*)$/mi', $content, $matches)) {
+            $meta['requires_plugins'] = trim($matches[1]);
         }
         if (preg_match('/Permissions:\s*(.*)$/mi', $content, $matches)) {
             $meta['permissions'] = trim($matches[1]);
@@ -413,6 +761,75 @@ class PluginManager
         // 2. Metadata parsing
         $meta = $this->parsePluginHeader($pluginFile);
         $report['meta'] = $meta;
+
+        // 2a. PHP Version Requirement Check
+        if (!empty($meta['requires_php'])) {
+            if (version_compare(PHP_VERSION, $meta['requires_php'], '<')) {
+                $report['compatible'] = false;
+                $report['checks'][] = [
+                    'type' => 'php_version',
+                    'status' => 'fail',
+                    'title' => 'PHP Version Requirement Unmet',
+                    'message' => "Plugin requires PHP version {$meta['requires_php']} or higher (active PHP: " . PHP_VERSION . ")."
+                ];
+            } else {
+                $report['checks'][] = [
+                    'type' => 'php_version',
+                    'status' => 'pass',
+                    'title' => 'PHP Version Compatible',
+                    'message' => "PHP requirement met (Requires >= {$meta['requires_php']}, active: " . PHP_VERSION . ")."
+                ];
+            }
+        }
+
+        // 2b. Framework Core Version Requirement Check
+        if (!empty($meta['requires_core'])) {
+            $coreVersion = function_exists('get_setting') ? get_setting('framework_version', '1.0.0') : '1.0.0';
+            if (version_compare($coreVersion, $meta['requires_core'], '<')) {
+                $report['compatible'] = false;
+                $report['checks'][] = [
+                    'type' => 'core_version',
+                    'status' => 'fail',
+                    'title' => 'Framework Core Requirement Unmet',
+                    'message' => "Plugin requires Framework Core version {$meta['requires_core']} or higher (active Core: {$coreVersion})."
+                ];
+            } else {
+                $report['checks'][] = [
+                    'type' => 'core_version',
+                    'status' => 'pass',
+                    'title' => 'Framework Core Compatible',
+                    'message' => "Core requirement met (Requires >= {$meta['requires_core']}, active: {$coreVersion})."
+                ];
+            }
+        }
+
+        // 2c. Inter-Plugin Dependencies Requirement Check
+        if (!empty($meta['requires_plugins'])) {
+            $req_slugs = array_map('trim', explode(',', $meta['requires_plugins']));
+            $missing_deps = [];
+            foreach ($req_slugs as $req_slug) {
+                if (!empty($req_slug) && !$this->isPluginActive($req_slug)) {
+                    $missing_deps[] = $req_slug;
+                }
+            }
+
+            if (!empty($missing_deps)) {
+                $report['compatible'] = false;
+                $report['checks'][] = [
+                    'type' => 'plugin_dependencies',
+                    'status' => 'fail',
+                    'title' => 'Plugin Dependencies Missing',
+                    'message' => "Plugin requires active dependency module(s): " . implode(', ', $missing_deps)
+                ];
+            } else {
+                $report['checks'][] = [
+                    'type' => 'plugin_dependencies',
+                    'status' => 'pass',
+                    'title' => 'Plugin Dependencies Met',
+                    'message' => "All required dependency plugins are active (" . implode(', ', $req_slugs) . ")."
+                ];
+            }
+        }
 
         $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
         $required_prefix = $clean_slug . '_';
@@ -618,16 +1035,52 @@ class PluginManager
         try {
             // Find and parse plugin metadata headers
             $pluginsDir = __DIR__ . '/plugins';
-            $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
+            $pluginDir = $pluginsDir . '/' . $slug;
+            $pluginFile = $pluginDir . '/plugin.php';
             if (!file_exists($pluginFile)) {
                 throw new Exception("Plugin file not found: " . $pluginFile);
             }
 
             $meta = $this->parsePluginHeader($pluginFile);
+
+            // Version requirement checks
+            if (!empty($meta['requires_php']) && version_compare(PHP_VERSION, $meta['requires_php'], '<')) {
+                throw new Exception("PHP Version Incompatibility: Plugin requires PHP {$meta['requires_php']} or higher.");
+            }
+            if (!empty($meta['requires_core'])) {
+                $coreVersion = function_exists('get_setting') ? get_setting('framework_version', '1.0.0') : '1.0.0';
+                if (version_compare($coreVersion, $meta['requires_core'], '<')) {
+                    throw new Exception("Framework Core Incompatibility: Plugin requires Core {$meta['requires_core']} or higher.");
+                }
+            }
+
+            // Dependency plugins check
+            if (!empty($meta['requires_plugins'])) {
+                $req_slugs = array_map('trim', explode(',', $meta['requires_plugins']));
+                $missing = [];
+                foreach ($req_slugs as $rs) {
+                    if (!empty($rs) && !$this->isPluginActive($rs)) {
+                        $missing[] = $rs;
+                    }
+                }
+                if (!empty($missing)) {
+                    throw new Exception("Plugin Dependency Missing: Plugin requires active module(s): " . implode(', ', $missing));
+                }
+            }
+
             $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
             $required_prefix = $clean_slug . '_';
 
-            // 1. Dynamically load, validate, prefix, and register permissions to DB
+            // 1. Automatically execute install.sql if present
+            $install_sql_file = $pluginDir . '/sql/install.sql';
+            if (file_exists($install_sql_file)) {
+                $sql = file_get_contents($install_sql_file);
+                $expected_prefix = 'plug_' . $clean_slug . '_';
+                $sql = str_replace('{prefix}', $expected_prefix, $sql);
+                $db->exec($sql);
+            }
+
+            // 2. Dynamically load, validate, prefix, and register permissions to DB
             $provisioned_perms = [];
             if (!empty($meta['permissions'])) {
                 $perm_list = array_map('trim', explode(',', $meta['permissions']));
@@ -653,7 +1106,7 @@ class PluginManager
                 }
             }
 
-            // 2. Dynamically load, prefix, and register custom Roles and assign their permissions
+            // 3. Dynamically load, prefix, and register custom Roles and assign their permissions
             if (!empty($meta['roles'])) {
                 // Format example: role_name:perm1,perm2; role_name2:perm3
                 $roles_list = array_map('trim', explode(';', $meta['roles']));
@@ -700,9 +1153,20 @@ class PluginManager
                 }
             }
 
-            // Save active state to DB
-            $stmt = $db->prepare("INSERT IGNORE INTO active_plugins (plugin_slug) VALUES (?)");
-            $stmt->execute([$slug]);
+            // Save active state to DB with version tracking if supported
+            $pluginVersion = $meta['version'] ?? '1.0.0';
+            try {
+                $stmt = $db->prepare("
+                    INSERT INTO active_plugins (plugin_slug, installed_version)
+                    VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE installed_version = VALUES(installed_version)
+                ");
+                $stmt->execute([$slug, $pluginVersion]);
+            } catch (Exception $e) {
+                // Fallback for DB schemas without installed_version column
+                $stmt = $db->prepare("INSERT IGNORE INTO active_plugins (plugin_slug) VALUES (?)");
+                $stmt->execute([$slug]);
+            }
 
             $db->commit();
             $this->activePlugins[] = $slug;
@@ -736,13 +1200,25 @@ class PluginManager
         try {
             // Find and parse plugin metadata headers
             $pluginsDir = __DIR__ . '/plugins';
-            $pluginFile = $pluginsDir . '/' . $slug . '/plugin.php';
+            $pluginDir = $pluginsDir . '/' . $slug;
+            $pluginFile = $pluginDir . '/plugin.php';
             if (file_exists($pluginFile)) {
                 $meta = $this->parsePluginHeader($pluginFile);
                 $clean_slug = preg_replace('/[^a-zA-Z0-9_]/', '_', $slug);
                 $required_prefix = $clean_slug . '_';
 
-                // 1. Drop associated custom Roles & Role-permissions linkage
+                // 1. Automatically execute uninstall.sql if purge_tables is requested
+                if ($purge_tables) {
+                    $uninstall_sql_file = $pluginDir . '/sql/uninstall.sql';
+                    if (file_exists($uninstall_sql_file)) {
+                        $sql = file_get_contents($uninstall_sql_file);
+                        $expected_prefix = 'plug_' . $clean_slug . '_';
+                        $sql = str_replace('{prefix}', $expected_prefix, $sql);
+                        $db->exec($sql);
+                    }
+                }
+
+                // 2. Drop associated custom Roles & Role-permissions linkage
                 if (!empty($meta['roles'])) {
                     $roles_list = array_map('trim', explode(';', $meta['roles']));
                     foreach ($roles_list as $role_expr) {
@@ -760,7 +1236,7 @@ class PluginManager
                     }
                 }
 
-                // 2. Dynamically clean up / remove permissions on deactivation
+                // 3. Dynamically clean up / remove permissions on deactivation
                 if (!empty($meta['permissions'])) {
                     $perm_list = array_map('trim', explode(',', $meta['permissions']));
 
@@ -816,6 +1292,18 @@ class PluginManager
                 // Wrap each plugin booting individually to ensure faulty plugins don't break loading
                 try {
                     require_once $pluginFile;
+
+                    // Load plugin textdomain translations if /languages/ directory exists
+                    $langDir = $pluginsDir . '/' . $slug . '/languages';
+                    if (is_dir($langDir)) {
+                        $this->loadTextDomain($slug, $langDir);
+                    }
+
+                    // Parse plugin version and run migrations if newer version installed
+                    $meta = $this->parsePluginHeader($pluginFile);
+                    if (!empty($meta['version'])) {
+                        $this->migratePlugin($slug, $meta['version']);
+                    }
                 } catch (Throwable $t) {
                     $err_msg = "Error booting plugin [{$slug}]: " . $t->getMessage() . " in " . $t->getFile() . ":" . $t->getLine();
                     $this->pluginErrors[$slug] = $err_msg;

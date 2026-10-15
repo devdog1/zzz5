@@ -25,10 +25,10 @@ if (isset($_POST['azure_login'])) {
     <meta charset="UTF-8">
     <title>Login - <?= htmlspecialchars($site_name) ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="theme.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            background-color: #f4f6f9;
             height: 100vh;
             display: flex;
             align-items: center;

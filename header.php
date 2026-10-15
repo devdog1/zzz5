@@ -9,7 +9,10 @@ if ($current_page !== 'login.php' && $current_page !== 'callback.php') {
 
 $user_display_name = $_SESSION['user']['name'] ?? 'User';
 $user_roles = isset($_SESSION['roles']) ? array_keys($_SESSION['roles']) : [];
-$user_roles_str = implode(', ', array_map('ucfirst', $user_roles));
+$user_roles_hover_str = implode("\n", array_map('ucfirst', $user_roles));
+if (empty($user_roles_hover_str)) {
+    $user_roles_hover_str = 'No Roles Assigned';
+}
 $site_name = get_setting('site_name', 'Framework Portal');
 ?>
 <!DOCTYPE html>
@@ -20,55 +23,98 @@ $site_name = get_setting('site_name', 'Framework Portal');
     <title><?= htmlspecialchars($site_name) ?></title>
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Brand Guidelines Theme Override CSS -->
+    <link href="theme.css" rel="stylesheet">
     <!-- FontAwesome icons -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
 
     <!-- Action Hook for custom plugin styles / scripts inside <head> -->
     <?php $pluginManager->doAction('theme_head'); ?>
-
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .navbar-brand {
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            margin-bottom: 20px;
-        }
-        /* Widget Resizing Rules: ensure plugin widgets stretch to fill 100% width of resized grid container */
-        .widget-item {
-            display: flex;
-            flex-direction: column;
-        }
-        .widget-inner-content,
-        .widget-inner-content > div,
-        .widget-inner-content .card,
-        .widget-inner-content .widget-block {
-            width: 100% !important;
-            max-width: 100% !important;
-            flex: 1 1 auto;
-        }
-        .card-header {
-            background-color: #fff;
-            border-bottom: 1px solid #f2f2f2;
-            font-weight: 600;
-        }
-    </style>
+    <?php $pluginManager->renderEnqueuedStyles(); ?>
+    <?php $pluginManager->renderEnqueuedScripts(false); ?>
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+<?php
+$is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_permission('manage_settings');
+?>
+
+<?php if ($is_admin_user): ?>
+<!-- Thin Black Admin Navigation Bar Above Main Nav -->
+<nav class="navbar navbar-expand admin-topbar">
+    <div class="container d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <span class="badge bg-warning text-dark me-2" style="font-size: 0.65rem;">ADMIN MODE</span>
+            <small class="text-white-50 d-none d-sm-inline">System Administration Control Panel</small>
+        </div>
+        <ul class="navbar-nav align-items-center ms-auto">
+            <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle text-warning fw-semibold" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="fa-solid fa-screwdriver-wrench me-1"></i> Administration
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <?php if (has_permission('manage_plugins')): ?>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-plugins.php') ? 'active' : '' ?>" href="admin-plugins.php">
+                                <i class="fa-solid fa-puzzle-piece me-2 text-primary"></i> Modules & Plugins
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-scheduler.php') ? 'active' : '' ?>" href="admin-scheduler.php">
+                                <i class="fa-solid fa-clock-rotate-left me-2 text-warning"></i> Task Scheduler
+                            </a>
+                        </li>
+                    <?php endif; ?>
+                    <?php if (has_permission('manage_settings')): ?>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-nav.php') ? 'active' : '' ?>" href="admin-nav.php">
+                                <i class="fa-solid fa-bars-staggered me-2 text-info"></i> Navigation Manager
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
+                                <i class="fa-solid fa-users-gear me-2 text-success"></i> Users & RBAC
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-roles.php') ? 'active' : '' ?>" href="admin-roles.php">
+                                <i class="fa-solid fa-user-shield me-2 text-warning"></i> Roles & Permissions
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-azure-groups.php') ? 'active' : '' ?>" href="admin-azure-groups.php">
+                                <i class="fa-brands fa-microsoft me-2 text-info"></i> Azure AD Groups
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-email.php') ? 'active' : '' ?>" href="admin-email.php">
+                                <i class="fa-solid fa-paper-plane me-2 text-info"></i> Outbound Email & Logs
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-logs.php') ? 'active' : '' ?>" href="admin-logs.php">
+                                <i class="fa-solid fa-receipt me-2 text-primary"></i> Audit Trail Logs
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item <?= ($current_page === 'admin-diagnostics.php') ? 'active' : '' ?>" href="admin-diagnostics.php">
+                                <i class="fa-solid fa-stethoscope me-2 text-danger"></i> System Diagnostics
+                            </a>
+                        </li>
+                    <?php endif; ?>
+                </ul>
+            </li>
+        </ul>
+    </div>
+</nav>
+<?php endif; ?>
+
+<nav class="navbar navbar-expand-lg navbar-westman mb-4">
     <div class="container">
-        <a class="navbar-brand" href="index.php">
-            <i class="fa-solid fa-cubes me-2 text-info"></i><?= htmlspecialchars($site_name) ?>
+        <a class="navbar-brand d-flex align-items-center" href="index.php">
+            <i class="fa-solid fa-cubes me-2 fs-3"></i><span><?= htmlspecialchars($site_name) ?></span>
         </a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarNav">
@@ -85,13 +131,79 @@ $site_name = get_setting('site_name', 'Framework Portal');
                 $raw_nav_links = [];
                 $raw_nav_links = $pluginManager->applyFilters('theme_nav_links', $raw_nav_links);
 
+                // Consolidate sub-menu items attached to existing or new parent menus (via 'parent' key matching route or label)
+                $consolidated_links = [];
+                $parent_index_map = [];
+
+                foreach ($raw_nav_links as $link) {
+                    // Check if this item is explicitly targeted as a child attaching to a parent navigation node
+                    if (!empty($link['parent'])) {
+                        $parent_info = $link['parent'];
+                        $parent_key = is_array($parent_info)
+                            ? strtolower(trim($parent_info['route'] ?? $parent_info['label'] ?? ''))
+                            : strtolower(trim($parent_info));
+
+                        // 1. Search if parent node already exists in consolidated links
+                        if (isset($parent_index_map[$parent_key])) {
+                            $idx = $parent_index_map[$parent_key];
+                            if (!isset($consolidated_links[$idx]['children'])) {
+                                $consolidated_links[$idx]['children'] = [];
+                            }
+                            $consolidated_links[$idx]['children'][] = $link;
+                            continue;
+                        }
+
+                        // 2. Parent node does not exist: dynamically create main nav parent node
+                        $parent_label = is_array($parent_info)
+                            ? ($parent_info['label'] ?? ucfirst($parent_key))
+                            : ($link['parent_label'] ?? ucfirst($parent_key));
+
+                        $parent_icon = is_array($parent_info)
+                            ? ($parent_info['icon'] ?? ($link['parent_icon'] ?? 'fa-solid fa-folder'))
+                            : ($link['parent_icon'] ?? 'fa-solid fa-folder');
+
+                        $new_parent_node = [
+                            'label'    => $parent_label,
+                            'icon'     => $parent_icon,
+                            'children' => [$link]
+                        ];
+
+                        $parent_idx = count($consolidated_links);
+                        $consolidated_links[] = $new_parent_node;
+
+                        $parent_index_map[$parent_key] = $parent_idx;
+                        $parent_index_map[strtolower(trim($parent_label))] = $parent_idx;
+                        continue;
+                    }
+
+                    // Top-level navigation node
+                    $item_key = !empty($link['route']) ? strtolower($link['route']) : preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($link['label']));
+
+                    if (isset($parent_index_map[$item_key])) {
+                        // Parent node was created dynamically earlier, merge properties
+                        $existing_idx = $parent_index_map[$item_key];
+                        $existing_children = $consolidated_links[$existing_idx]['children'] ?? [];
+                        if (!empty($link['children'])) {
+                            $existing_children = array_merge($existing_children, $link['children']);
+                        }
+                        $link['children'] = $existing_children;
+                        $consolidated_links[$existing_idx] = $link;
+                    } else {
+                        $link_idx = count($consolidated_links);
+                        $consolidated_links[] = $link;
+
+                        $parent_index_map[$item_key] = $link_idx;
+                        $parent_index_map[strtolower(trim($link['label']))] = $link_idx;
+                    }
+                }
+
                 $nav_config_json = get_setting('nav_menu_config', '{}');
                 $nav_config = json_decode($nav_config_json, true) ?: [];
 
                 $processed_nav_links = [];
                 $default_order = 100;
 
-                foreach ($raw_nav_links as $link) {
+                foreach ($consolidated_links as $link) {
                     $item_id = !empty($link['route']) ? $link['route'] : preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($link['label']));
                     $cfg = $nav_config[$item_id] ?? [];
 
@@ -124,6 +236,15 @@ $site_name = get_setting('site_name', 'Framework Portal');
                     }
 
                     if (!empty($link['children']) && is_array($link['children'])) {
+                        // Filter visible children based on individual permission checks
+                        $visible_children = array_filter($link['children'], function($child) {
+                            return !isset($child['permission']) || has_permission($child['permission']);
+                        });
+
+                        if (empty($visible_children)) {
+                            continue;
+                        }
+
                         // Render nested Bootstrap 5 Dropdown sub-menu
                         echo '<li class="nav-item dropdown">';
                         echo '<a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">';
@@ -134,10 +255,7 @@ $site_name = get_setting('site_name', 'Framework Portal');
                         echo '</a>';
                         echo '<ul class="dropdown-menu">';
 
-                        foreach ($link['children'] as $child) {
-                            if (isset($child['permission']) && !has_permission($child['permission'])) {
-                                continue;
-                            }
+                        foreach ($visible_children as $child) {
                             echo '<li>';
                             echo '<a class="dropdown-item" href="index.php?route=' . urlencode($child['route']) . '">';
                             if (isset($child['icon'])) {
@@ -166,71 +284,30 @@ $site_name = get_setting('site_name', 'Framework Portal');
                 ?>
             </ul>
 
-            <!-- Right Side Navbar Menu (Consolidating Core Admin links to the right dropdown) -->
+            <!-- Right Side Navbar Menu -->
             <ul class="navbar-nav ms-auto align-items-center me-3">
-                <?php if (has_permission('manage_plugins') || has_permission('manage_settings')): ?>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="fa-solid fa-screwdriver-wrench me-1 text-warning"></i> Administration
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <?php if (has_permission('manage_plugins')): ?>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-plugins.php') ? 'active' : '' ?>" href="admin-plugins.php">
-                                        <i class="fa-solid fa-puzzle-piece me-2 text-primary"></i> Modules & Plugins
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-scheduler.php') ? 'active' : '' ?>" href="admin-scheduler.php">
-                                        <i class="fa-solid fa-clock-rotate-left me-2 text-warning"></i> Task Scheduler
-                                    </a>
-                                </li>
-                            <?php endif; ?>
-                            <?php if (has_permission('manage_settings')): ?>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-nav.php') ? 'active' : '' ?>" href="admin-nav.php">
-                                        <i class="fa-solid fa-bars-staggered me-2 text-info"></i> Navigation Manager
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-users.php') ? 'active' : '' ?>" href="admin-users.php">
-                                        <i class="fa-solid fa-users-gear me-2 text-success"></i> Users & RBAC
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-roles.php') ? 'active' : '' ?>" href="admin-roles.php">
-                                        <i class="fa-solid fa-user-shield me-2 text-warning"></i> Roles & Permissions
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-azure-groups.php') ? 'active' : '' ?>" href="admin-azure-groups.php">
-                                        <i class="fa-brands fa-microsoft me-2 text-info"></i> Azure AD Groups
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-logs.php') ? 'active' : '' ?>" href="admin-logs.php">
-                                        <i class="fa-solid fa-receipt me-2 text-primary"></i> Audit Trail Logs
-                                    </a>
-                                </li>
-                                <li>
-                                    <a class="dropdown-item <?= ($current_page === 'admin-diagnostics.php') ? 'active' : '' ?>" href="admin-diagnostics.php">
-                                        <i class="fa-solid fa-stethoscope me-2 text-danger"></i> System Diagnostics
-                                    </a>
-                                </li>
-                            <?php endif; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
             </ul>
 
             <!-- User Session profile & logout -->
             <?php if (isset($_SESSION['user_id'])): ?>
-                <div class="d-flex align-items-center text-white">
-                    <div class="me-3 text-end">
-                        <div class="fw-bold small"><?= htmlspecialchars($user_display_name) ?></div>
-                        <div class="text-muted small" style="font-size: 0.75rem;"><?= htmlspecialchars($user_roles_str) ?></div>
+                <div class="d-flex align-items-center">
+                    <div class="user-pill me-3 text-end d-none d-sm-block position-relative role-hover-container">
+                        <span class="fw-bold small text-dark cursor-pointer">
+                            <i class="fa-solid fa-circle-user me-1 text-primary"></i><?= htmlspecialchars($user_display_name) ?>
+                        </span>
+                        <div class="role-hover-card shadow-sm">
+                            <div class="role-hover-header">Roles & Memberships</div>
+                            <div class="role-hover-body">
+                                <?php foreach ($user_roles as $role): ?>
+                                    <div class="role-hover-item"><i class="fa-solid fa-shield-halved me-1 text-primary"></i><?= htmlspecialchars(ucfirst($role)) ?></div>
+                                <?php endforeach; ?>
+                                <?php if (empty($user_roles)): ?>
+                                    <div class="role-hover-item text-muted">No roles assigned</div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     </div>
-                    <a href="logout.php" class="btn btn-sm btn-outline-danger">
+                    <a href="logout.php" class="btn btn-sm btn-outline-danger btn-pill">
                         <i class="fa-solid fa-right-from-bracket me-1"></i>Logout
                     </a>
                 </div>
