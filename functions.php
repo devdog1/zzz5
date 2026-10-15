@@ -6,8 +6,22 @@ require_once __DIR__ . '/Scheduler.php';
 require_once __DIR__ . '/PluginManager.php';
 require_once __DIR__ . '/Mailer.php';
 
+if (!defined('FRAMEWORK_VERSION')) {
+    define('FRAMEWORK_VERSION', '1.1.0');
+}
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
+}
+
+/**
+ * Get current core framework version.
+ */
+function get_framework_version() {
+    if (defined('FRAMEWORK_VERSION')) {
+        return FRAMEWORK_VERSION;
+    }
+    return get_setting('framework_version', '1.1.0');
 }
 
 // Global Auth Reference

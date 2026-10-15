@@ -231,6 +231,37 @@ require_once __DIR__ . '/header.php';
                                             <?php endif; ?>
                                         </td>
                                         <td class="text-end">
+                                            <?php
+                                            $p_changelog = $pluginManager->getPluginChangelog($slug);
+                                            if ($p_changelog):
+                                            ?>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#changelogModal_<?= md5($slug) ?>" title="View Plugin Changelog">
+                                                    <i class="fa-solid fa-scroll me-1"></i>Changelog
+                                                </button>
+
+                                                <!-- Plugin Changelog Modal -->
+                                                <div class="modal fade text-start" id="changelogModal_<?= md5($slug) ?>" tabindex="-1">
+                                                    <div class="modal-dialog modal-lg">
+                                                        <div class="modal-content">
+                                                            <div class="modal-header bg-primary text-white">
+                                                                <h5 class="modal-title h6 fw-bold">
+                                                                    <i class="fa-solid fa-scroll me-2"></i>Module Changelog: <?= htmlspecialchars($meta['name']) ?> (<code><?= htmlspecialchars($p_changelog['filename']) ?></code>)
+                                                                </h5>
+                                                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                                            </div>
+                                                            <div class="modal-body p-4">
+                                                                <div class="plugin-changelog-content">
+                                                                    <?= $p_changelog['html'] ?>
+                                                                </div>
+                                                            </div>
+                                                            <div class="modal-footer py-2">
+                                                                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            <?php endif; ?>
+
                                             <form method="POST" class="m-0 d-inline-block">
                                                 <?php csrf_field(); ?>
                                                 <input type="hidden" name="plugin_slug" value="<?= htmlspecialchars($slug) ?>">

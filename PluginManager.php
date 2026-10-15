@@ -629,6 +629,95 @@ class PluginManager
         return true;
     }
 
+    /**
+     * Retrieve and parse a plugin's changelog file if present.
+     *
+     * @param string $slug
+     * @return array|null Returns array ['filename' => ..., 'raw' => ..., 'html' => ...] or null if missing.
+     */
+    public function getPluginChangelog($slug)
+    {
+        $pluginsDir = __DIR__ . '/plugins';
+        $pluginDir = $pluginsDir . '/' . $slug;
+
+        if (!is_dir($pluginDir)) {
+            return null;
+        }
+
+        $candidates = ['CHANGELOG.md', 'changelog.md', 'CHANGELOG.txt', 'changelog.txt'];
+        foreach ($candidates as $cand) {
+            $filepath = $pluginDir . '/' . $cand;
+            if (file_exists($filepath)) {
+                $raw = file_get_contents($filepath);
+                return [
+                    'filename' => $cand,
+                    'raw' => $raw,
+                    'html' => $this->parseMarkdownToHtml($raw)
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Markdown to HTML converter for changelog formatting.
+     */
+    public function parseMarkdownToHtml($markdown)
+    {
+        if (empty($markdown)) return '';
+
+        $lines = explode("\n", $markdown);
+        $html = '';
+        $inList = false;
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+
+            if ($inList && (empty($trimmed) || strpos($trimmed, '#') === 0)) {
+                $html .= "</ul>\n";
+                $inList = false;
+            }
+
+            if (empty($trimmed)) {
+                continue;
+            }
+
+            if (preg_match('/^###\s+(.*)$/', $trimmed, $m)) {
+                $html .= '<h5 class="fw-bold text-secondary mt-3 mb-2">' . $this->inlineMarkdown($m[1]) . '</h5>' . "\n";
+            } elseif (preg_match('/^##\s+(.*)$/', $trimmed, $m)) {
+                $html .= '<h4 class="fw-bold text-primary border-bottom pb-1 mt-4 mb-2">' . $this->inlineMarkdown($m[1]) . '</h4>' . "\n";
+            } elseif (preg_match('/^#\s+(.*)$/', $trimmed, $m)) {
+                $html .= '<h3 class="fw-bold text-dark border-bottom pb-2 mt-3 mb-3">' . $this->inlineMarkdown($m[1]) . '</h3>' . "\n";
+            } elseif (preg_match('/^[\-\*]\s+(.*)$/', $trimmed, $m)) {
+                if (!$inList) {
+                    $html .= '<ul class="mb-2 ps-3">' . "\n";
+                    $inList = true;
+                }
+                $html .= '<li class="mb-1 text-secondary">' . $this->inlineMarkdown($m[1]) . '</li>' . "\n";
+            } elseif ($trimmed === '---' || $trimmed === '***') {
+                $html .= '<hr class="my-3">' . "\n";
+            } else {
+                $html .= '<p class="mb-2 text-dark">' . $this->inlineMarkdown($trimmed) . '</p>' . "\n";
+            }
+        }
+
+        if ($inList) {
+            $html .= "</ul>\n";
+        }
+
+        return $html;
+    }
+
+    private function inlineMarkdown($text)
+    {
+        $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+        $text = preg_replace('/\*\*(.*?)\*\*/', '<strong>$1</strong>', $text);
+        $text = preg_replace('/`(.*?)`/', '<code>$1</code>', $text);
+        $text = preg_replace('/\*([^\*]+)\*/', '<em>$1</em>', $text);
+        return $text;
+    }
+
     public function getActivePlugins()
     {
         return $this->activePlugins;
