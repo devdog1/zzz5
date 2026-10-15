@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
-## [1.1.0] - 2025-02-15
+## [1.1.0] - 2026-10-14
 
 ### Added
 - **Plugin Asset Queueing Engine**: Built `enqueue_style()` and `enqueue_script()` methods in `PluginManager.php` and `functions.php` to queue CSS and JS assets cleanly with automatic rendering in `<head>` and before `</body>`.
@@ -27,7 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
-## [1.0.0] - 2025-01-10
+## [1.0.0] - 2026-05-10
 
 ### Added
 - **Baseline Framework Release**: Core WordPress-style action/filter hook engine (`PluginManager.php`).
