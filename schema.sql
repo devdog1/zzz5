@@ -171,6 +171,17 @@ CREATE TABLE IF NOT EXISTS email_logs (
     sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 10. Asynchronous Event Bus Queue Table
+CREATE TABLE IF NOT EXISTS event_queue (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    event_name VARCHAR(150) NOT NULL,
+    payload LONGTEXT DEFAULT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending', -- 'pending', 'processed', 'failed'
+    error_message TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at DATETIME DEFAULT NULL
+);
+
 INSERT IGNORE INTO permissions (id, permission_name, description) VALUES
 (1, 'manage_settings', 'Modify system and plugin settings'),
 (2, 'manage_plugins', 'Activate/Deactivate plugins'),

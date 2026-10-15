@@ -30,6 +30,8 @@ $site_name = get_setting('site_name', 'Framework Portal');
 
     <!-- Action Hook for custom plugin styles / scripts inside <head> -->
     <?php $pluginManager->doAction('theme_head'); ?>
+    <?php $pluginManager->renderEnqueuedStyles(); ?>
+    <?php $pluginManager->renderEnqueuedScripts(false); ?>
 </head>
 <body>
 
@@ -165,10 +167,6 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                             'icon'     => $parent_icon,
                             'children' => [$link]
                         ];
-
-                        if (isset($link['permission'])) {
-                            // Don't restrict parent completely if other children might exist, but pass default if needed
-                        }
 
                         $parent_idx = count($consolidated_links);
                         $consolidated_links[] = $new_parent_node;

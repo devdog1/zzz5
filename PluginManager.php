@@ -9,6 +9,10 @@ class PluginManager
     private $filters = [];
     private $routes = [];
     private $services = []; // Inter-Plugin Shared Service Registry
+    private $events = [];   // Event Bus Registry
+    private $enqueuedScripts = []; // Enqueued Scripts Queue
+    private $enqueuedStyles = [];  // Enqueued Styles Queue
+    private $translations = [];    // Language Dictionaries
     private $activePlugins = [];
     private $pluginMeta = [];
     private $pluginErrors = [];
@@ -24,6 +28,137 @@ class PluginManager
             self::$instance = new self();
         }
         return self::$instance;
+    }
+
+    /* =========================================================
+     * ASSET QUEUEING API (CSS & JS Enqueuing)
+     * ========================================================= */
+
+    public function enqueueScript($handle, $src, array $deps = [], $ver = false, $inFooter = true)
+    {
+        $this->enqueuedScripts[$handle] = [
+            'src' => $src,
+            'deps' => $deps,
+            'ver' => $ver,
+            'in_footer' => (bool)$inFooter
+        ];
+    }
+
+    public function enqueueStyle($handle, $src, array $deps = [], $ver = false, $media = 'all')
+    {
+        $this->enqueuedStyles[$handle] = [
+            'src' => $src,
+            'deps' => $deps,
+            'ver' => $ver,
+            'media' => $media
+        ];
+    }
+
+    public function renderEnqueuedStyles()
+    {
+        foreach ($this->enqueuedStyles as $handle => $style) {
+            $verStr = $style['ver'] ? '?v=' . urlencode($style['ver']) : '';
+            $url = htmlspecialchars($style['src'] . $verStr);
+            $media = htmlspecialchars($style['media']);
+            echo "<link rel=\"stylesheet\" id=\"{$handle}-css\" href=\"{$url}\" media=\"{$media}\">\n";
+        }
+    }
+
+    public function renderEnqueuedScripts($inFooterLocation = true)
+    {
+        foreach ($this->enqueuedScripts as $handle => $script) {
+            if ($script['in_footer'] === $inFooterLocation) {
+                $verStr = $script['ver'] ? '?v=' . urlencode($script['ver']) : '';
+                $url = htmlspecialchars($script['src'] . $verStr);
+                echo "<script id=\"{$handle}-js\" src=\"{$url}\"></script>\n";
+            }
+        }
+    }
+
+    /* =========================================================
+     * TRANSLATION & I18N API
+     * ========================================================= */
+
+    public function loadTextDomain($domain, $langDir = null)
+    {
+        $lang = get_setting('site_language', 'en_US');
+        if (empty($langDir)) {
+            $langDir = __DIR__ . '/languages';
+        }
+
+        $file = rtrim($langDir, '/') . "/{$domain}-{$lang}.json";
+        if (file_exists($file)) {
+            $json = file_get_contents($file);
+            $data = json_decode($json, true);
+            if (is_array($data)) {
+                if (!isset($this->translations[$domain])) {
+                    $this->translations[$domain] = [];
+                }
+                $this->translations[$domain] = array_merge($this->translations[$domain], $data);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public function translate($text, $domain = 'default')
+    {
+        if (isset($this->translations[$domain][$text])) {
+            return $this->translations[$domain][$text];
+        }
+        return $text;
+    }
+
+    /* =========================================================
+     * ASYNCHRONOUS / SYNCHRONOUS EVENT BUS API
+     * ========================================================= */
+
+    public function addEventListener($eventName, $callback, $priority = 10)
+    {
+        if (!isset($this->events[$eventName])) {
+            $this->events[$eventName] = [];
+        }
+        $this->events[$eventName][$priority][] = $callback;
+    }
+
+    public function dispatchEvent($eventName, array $payload = [], $async = false)
+    {
+        if ($async) {
+            // Queue event in DB event bus queue table for background CLI worker execution
+            try {
+                $db = get_db_connection();
+                $stmt = $db->prepare("
+                    INSERT INTO event_queue (event_name, payload, status, created_at)
+                    VALUES (?, ?, 'pending', NOW())
+                ");
+                $stmt->execute([$eventName, json_encode($payload)]);
+                if (function_exists('log_action')) {
+                    log_action('EVENT_DISPATCHED_ASYNC', ['event' => $eventName]);
+                }
+                return true;
+            } catch (Throwable $t) {
+                error_log("Failed to queue async event [{$eventName}]: " . $t->getMessage());
+            }
+        }
+
+        // Synchronous event dispatch
+        if (!isset($this->events[$eventName])) {
+            return false;
+        }
+
+        $priorities = $this->events[$eventName];
+        ksort($priorities);
+
+        foreach ($priorities as $priority => $callbacks) {
+            foreach ($callbacks as $callback) {
+                try {
+                    call_user_func($callback, $payload);
+                } catch (Throwable $t) {
+                    error_log("Error executing event listener [{$eventName}]: " . $t->getMessage());
+                }
+            }
+        }
+        return true;
     }
 
     /* =========================================================
@@ -278,16 +413,65 @@ class PluginManager
     }
 
     /* =========================================================
-     * EXTENSIBLE ROUTING
+     * EXTENSIBLE ROUTING & REST API ROUTER
      * ========================================================= */
     public function registerRoute($route, $callback)
     {
         $this->routes[$route] = $callback;
     }
 
+    /**
+     * Register a dedicated REST API endpoint route.
+     *
+     * @param string $endpoint Path, e.g. "api/v1/oncall/shift"
+     * @param string $method HTTP method e.g. "GET", "POST"
+     * @param callable $callback Handler callback returning array data
+     * @param string|null $permission Required permission check or null for public
+     */
+    public function registerApiRoute($endpoint, $method, $callback, $permission = null)
+    {
+        $routeKey = strtoupper($method) . ':' . ltrim($endpoint, '/');
+        $this->routes[$routeKey] = [
+            'type' => 'api',
+            'method' => strtoupper($method),
+            'endpoint' => ltrim($endpoint, '/'),
+            'callback' => $callback,
+            'permission' => $permission
+        ];
+    }
+
     public function handleRoute($route)
     {
-        if (isset($this->routes[$route])) {
+        $httpMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        $apiRouteKey = strtoupper($httpMethod) . ':' . ltrim($route, '/');
+
+        // 1. Handle REST API Endpoint Route
+        if (isset($this->routes[$apiRouteKey]) && is_array($this->routes[$apiRouteKey]) && isset($this->routes[$apiRouteKey]['type']) && $this->routes[$apiRouteKey]['type'] === 'api') {
+            $apiDef = $this->routes[$apiRouteKey];
+            header('Content-Type: application/json');
+
+            if (!empty($apiDef['permission']) && !has_permission($apiDef['permission'])) {
+                http_response_code(403);
+                echo json_encode(['error' => 'Forbidden: Insufficient permissions to access REST API endpoint.']);
+                return true;
+            }
+
+            try {
+                $rawInput = file_get_contents('php://input');
+                $jsonData = json_decode($rawInput, true) ?: [];
+                $requestParams = array_merge($_GET, $_POST, $jsonData);
+
+                $response = call_user_func($apiDef['callback'], $requestParams);
+                echo json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            } catch (Throwable $t) {
+                http_response_code(500);
+                echo json_encode(['error' => 'REST API Exception: ' . $t->getMessage()]);
+            }
+            return true;
+        }
+
+        // 2. Handle HTML View Route Handler
+        if (isset($this->routes[$route]) && is_callable($this->routes[$route])) {
             // SANDBOX SHIELD: Wrap plugin route handlers in try/catch block
             try {
                 call_user_func($this->routes[$route]);
@@ -301,6 +485,7 @@ class PluginManager
             }
             return true;
         }
+
         return false;
     }
 
@@ -1107,6 +1292,12 @@ class PluginManager
                 // Wrap each plugin booting individually to ensure faulty plugins don't break loading
                 try {
                     require_once $pluginFile;
+
+                    // Load plugin textdomain translations if /languages/ directory exists
+                    $langDir = $pluginsDir . '/' . $slug . '/languages';
+                    if (is_dir($langDir)) {
+                        $this->loadTextDomain($slug, $langDir);
+                    }
 
                     // Parse plugin version and run migrations if newer version installed
                     $meta = $this->parsePluginHeader($pluginFile);

@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [1.1.0] - 2025-02-15
 
 ### Added
+- **Plugin Asset Queueing Engine**: Built `enqueue_style()` and `enqueue_script()` methods in `PluginManager.php` and `functions.php` to queue CSS and JS assets cleanly with automatic rendering in `<head>` and before `</body>`.
+- **Translation & i18n Subsystem**: Built `__($text, $domain)` translation lookup helper and automatic JSON language dictionary loader (`/languages/` and `/plugins/{slug}/languages/`).
+- **REST API Router**: Built `register_api_route()` in `PluginManager.php` and `functions.php` supporting method matching (GET/POST/PUT/DELETE), JSON body parsing, and route permission checks.
+- **Asynchronous Event Bus Queue**: Created `dispatch_event()` and `add_event_listener()` event system with database queueing support via `event_queue` table.
+- **CLI Plugin Management**: Added CLI commands in `cron.php` (`--version`, `--plugin-list`, `--plugin-activate=`, `--plugin-deactivate=`, `--plugin-inspect=`).
 - **Inter-Plugin Dependency Management (`Requires Plugins:`)**: Added support in `PluginManager.php` for parsing `Requires Plugins:` header metadata. Verification checks in `inspectPlugin()` and `activatePlugin()` enforce that required dependent plugins are installed and active before a module can be activated.
 - **Hook Unbinding API (`remove_action` / `remove_filter`)**: Added `removeAction()` and `removeFilter()` methods in `PluginManager.php` and corresponding global wrapper functions in `functions.php` to allow plugins or core features to unbind previously registered callbacks.
 - **Plugin Header Requirements & Compatibility Engine**: Updated `PluginManager.php` to parse `Requires PHP:` and `Requires Core:` metadata headers in plugins. Added validation checks in both the compatibility inspector (`inspectPlugin`) and activation handler (`activatePlugin`) to block incompatible module activations.

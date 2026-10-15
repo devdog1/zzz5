@@ -13,16 +13,21 @@ This guide details the architecture, standards, mandatory requirements, optional
 4. [Automated Schema Setup & Uninstall (`install.sql` / `uninstall.sql`)](#4-automated-schema-setup--uninstall-installsql--uninstallsql)
 5. [Plugin Versioning & SQL Migrations](#5-plugin-versioning--sql-migrations)
 6. [Outbound Email Delivery in Plugins](#6-outbound-email-delivery-in-plugins)
-7. [Hook System (Actions, Filters & Hook Unbinding)](#7-hook-system-actions-filters--hook-unbinding)
-8. [Extensible Route Handlers & Views](#8-extensible-route-handlers--views)
-9. [Dynamic Navigation Menus (Top-Level & Nested Dropdowns)](#9-dynamic-navigation-menus)
-10. [Home Dashboard Widgets](#10-home-dashboard-widgets)
-11. [Inter-Plugin Exposed Services](#11-inter-plugin-exposed-services)
-12. [Dynamic Permission & Role Loading](#12-dynamic-permission--role-loading)
-13. [Database Isolation & SQL Prefixing](#13-database-isolation--sql-prefixing)
-14. [Plugin Settings API](#14-plugin-settings-api)
-15. [Task Scheduler API](#15-task-scheduler-api)
-16. [Verbose Plugin Compatibility Inspector](#16-verbose-plugin-compatibility-inspector)
+7. [Asset Queueing API (`enqueue_script`, `enqueue_style`)](#7-asset-queueing-api-enqueue_script-enqueue_style)
+8. [Translation & i18n API (`__($text, $domain)`)](#8-translation--i18n-api-__text-domain)
+9. [REST API Router (`register_api_route`)](#9-rest-api-router-register_api_route)
+10. [Asynchronous Event Bus (`dispatch_event`, `add_event_listener`)](#10-asynchronous-event-bus-dispatch_event-add_event_listener)
+11. [CLI Plugin Management Interface](#11-cli-plugin-management-interface)
+12. [Hook System (Actions, Filters & Hook Unbinding)](#12-hook-system-actions-filters--hook-unbinding)
+13. [Extensible Route Handlers & Views](#13-extensible-route-handlers--views)
+14. [Dynamic Navigation Menus (Top-Level & Nested Dropdowns)](#14-dynamic-navigation-menus)
+15. [Home Dashboard Widgets](#15-home-dashboard-widgets)
+16. [Inter-Plugin Exposed Services](#16-inter-plugin-exposed-services)
+17. [Dynamic Permission & Role Loading](#17-dynamic-permission--role-loading)
+18. [Database Isolation & SQL Prefixing](#18-database-isolation--sql-prefixing)
+19. [Plugin Settings API](#19-plugin-settings-api)
+20. [Task Scheduler API](#20-task-scheduler-api)
+21. [Verbose Plugin Compatibility Inspector](#21-verbose-plugin-compatibility-inspector)
 
 ---
 
@@ -46,6 +51,10 @@ Extensions in this framework are fully self-contained. The platform automaticall
 
 ### Optional Capabilities
 - **Dependencies & Version Requirements**: Declaring `Requires PHP:`, `Requires Core:`, and `Requires Plugins:` (comma-separated dependent plugin slugs) in headers.
+- **Assets Enqueuing**: Registering frontend CSS/JS files using `enqueue_style()` and `enqueue_script()`.
+- **Translations & i18n**: Storing language JSON files in `/plugins/{slug}/languages/` and translating strings via `__($text, $domain)`.
+- **REST API Endpoints**: Exposing JSON API endpoints via `register_api_route()`.
+- **Event Bus Queueing**: Subscribing to or queuing events via `add_event_listener()` and `dispatch_event($event, $payload, $async)`.
 - **Models / Business Logic**: Splitting complex logic into separate model files (`/models/`).
 - **Views**: Separating HTML rendering into distinct view files (`/views/`).
 - **Background Tasks**: Registering scheduled jobs using `init_scheduler` (`/tasks/`).
@@ -63,6 +72,10 @@ Extensions in this framework are fully self-contained. The platform automaticall
 /plugins/{plugin-slug}/
   │
   ├── plugin.php                   <-- REQUIRED: Primary entry point & hook orchestrator
+  │
+  ├── /languages/                  <-- OPTIONAL: JSON i18n translation dictionaries
+  │     ├── {plugin-slug}-en_US.json
+  │     └── ...
   │
   ├── /models/                     <-- OPTIONAL: Data access & business logic models
   │     └── {plugin-slug}-models.php
@@ -90,7 +103,7 @@ Extensions in this framework are fully self-contained. The platform automaticall
 
 ## 3. Plugin Header Metadata
 
-Every plugin must start with a header block in `plugin.php`. Optional headers `Requires PHP:`, `Requires Core:`, and `Requires Plugins:` ensure environmental and module dependencies are verified before activation:
+Every plugin must start with a header block in `plugin.php`:
 
 ```php
 <?php
@@ -118,20 +131,7 @@ if (!defined('APP_ROOT')) {
 Plugins can provide automated database table creation and cleanup scripts inside `/sql/`:
 
 * **`install.sql`**: Executed automatically by `PluginManager::activatePlugin()` during plugin activation. Uses `{prefix}` as a placeholder for `plug_{plugin_slug}_`.
-  ```sql
-  CREATE TABLE IF NOT EXISTS `{prefix}rotations` (
-      `id` INT AUTO_INCREMENT PRIMARY KEY,
-      `user_id` INT NOT NULL,
-      `shift_start` DATETIME NOT NULL,
-      `shift_end` DATETIME NOT NULL,
-      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-  ```
-
 * **`uninstall.sql`**: Executed automatically by `PluginManager::deactivatePlugin()` when the administrator selects "Purge Database Tables" upon deactivation.
-  ```sql
-  DROP TABLE IF EXISTS `{prefix}rotations`;
-  ```
 
 ---
 
@@ -139,19 +139,7 @@ Plugins can provide automated database table creation and cleanup scripts inside
 
 Plugins declare a semantic version number in their `Version:` header (e.g. `Version: 1.2.0`). The core framework tracks installed plugin versions in the `active_plugins` table (`installed_version` column).
 
-When a plugin is updated on disk with a higher version number, `PluginManager::boot()` automatically detects the version difference and triggers `PluginManager::migratePlugin()` during framework initialization:
-
-1. **Sequential SQL Migration Execution**:
-   - Looks for SQL files in `/plugins/{plugin-slug}/sql/migrations/` named after target version increments (e.g. `1.1.0.sql`, `1.2.0.sql`, `2.0.0.sql`).
-   - Filters and sorts migration files sequentially where `migration_version > installed_version` and `<= current_disk_version`.
-   - Automatically replaces `{prefix}` placeholders with the required isolated plugin table prefix (`plug_{plugin_slug}_`).
-   - Executes each SQL migration step within the database and updates `installed_version` step-by-step.
-
-2. **Custom Migration Hook**:
-   - Triggers the `plugin_migrate_{plugin_slug}` action hook after SQL migrations complete, passing `($installedVersion, $currentVersion)`. Plugins can hook into this event to perform programmatic data transformations.
-
-3. **Version Finalization**:
-   - Updates `installed_version` in the `active_plugins` table to match the current disk version and logs `PLUGIN_MIGRATED_SUCCESS` to the audit trail.
+When a plugin is updated on disk with a higher version number, `PluginManager::boot()` automatically detects the version difference and triggers `PluginManager::migratePlugin()` during framework initialization to sequentially execute `/sql/migrations/*.sql` scripts.
 
 ---
 
@@ -167,75 +155,109 @@ $result = send_email(
     'oncall-manager',                             // Plugin slug (for log attribution)
     'oncall-alerts@example.com'                   // Optional custom From address
 );
-
-if ($result['success']) {
-    // Email accepted by SMTP server (SMTP Code e.g. '250 2.0.0')
-} else {
-    // Delivery failed (SMTP Code e.g. '550 5.1.1', Error msg in $result['smtp_message'])
-}
 ```
-
-Key features for plugin emails:
-- **Automatic Attribution**: Specifies `plugin_slug` to tag outbound emails in the `email_logs` table and adds an `X-Plugin-Source: {plugin_slug}` header.
-- **Custom From Address**: Plugins can pass a custom `$custom_from` address while benefiting from core SMTP relay and bounce envelope configurations.
-- **Audit Logging**: Every email dispatch generates an `OUTBOUND_EMAIL_SENT` audit trail log and records full SMTP DSN response codes for troubleshooting.
 
 ---
 
-## 7. Hook System (Actions, Filters & Hook Unbinding)
+## 7. Asset Queueing API (`enqueue_script`, `enqueue_style`)
 
-### Filters (Modify data arrays or strings)
-Filters accept a variable, modify it, and return it.
+Plugins can safely enqueue CSS stylesheets and JS scripts without manually injecting HTML or duplicate script tags:
 
 ```php
-add_filter('theme_nav_links', function ($links) {
-    // 1. Full Top-Level Menu with Children
-    $links[] = [
-        'label' => 'On-Call Schedule',
-        'icon'  => 'fa-solid fa-phone-volume',
-        'route' => 'oncall_calendar',
-        'children' => [
-            ['label' => 'Rotation Calendar', 'icon' => 'fa-solid fa-calendar-days', 'route' => 'oncall_calendar'],
-            ['label' => 'Shift Trade Center', 'icon' => 'fa-solid fa-handshake', 'route' => 'oncall_trades']
-        ]
-    ];
+// Enqueue a stylesheet into <head>
+enqueue_style('chartjs-css', 'https://cdn.jsdelivr.net/npm/chart.js/dist/chart.min.css', [], '4.4.0');
 
-    // 2. Direct Nested Item Attachment (No pre-existing parent required!)
-    $links[] = [
-        'label'        => 'Override Management',
-        'icon'         => 'fa-solid fa-user-gear',
-        'route'        => 'oncall_overrides',
-        'parent'       => 'On-Call Schedule',      // Matches parent route or label
-        'parent_icon'  => 'fa-solid fa-phone-volume' // Optional parent icon fallback
-    ];
-
-    return $links;
-});
+// Enqueue a JavaScript file before </body>
+enqueue_script('chartjs-js', 'https://cdn.jsdelivr.net/npm/chart.js', [], '4.4.0', true);
 ```
 
-### Actions (Trigger output or side-effects)
-* **`theme_head`**: Inject custom stylesheets, meta tags, or CDN scripts into `<head>`.
-* **`theme_footer`**: Inject scripts before `</body>`.
+---
 
-### Hook Unbinding API
-Plugins can unbind registered actions or filters using `remove_action()` and `remove_filter()`:
+## 8. Translation & i18n API (`__($text, $domain)`)
+
+Plugins can translate strings using language JSON files located in `/plugins/{slug}/languages/{slug}-{lang}.json`:
+
 ```php
-// Unbind a previously attached action or filter callback
+// Translate string with 'oncall-manager' text domain
+echo __('Rotation Calendar', 'oncall-manager');
+```
+
+---
+
+## 9. REST API Router (`register_api_route`)
+
+Plugins can register dedicated REST API endpoints returning JSON responses with HTTP status codes and permission checks:
+
+```php
+register_api_route('api/v1/oncall/shifts', 'GET', function($params) {
+    return [
+        'status' => 'success',
+        'shifts' => [ ['id' => 101, 'user' => 'jdoe'] ]
+    ];
+}, 'oncall_view_schedule');
+```
+
+---
+
+## 10. Asynchronous Event Bus (`dispatch_event`, `add_event_listener`)
+
+Plugins can subscribe to or dispatch synchronous or asynchronous events:
+
+```php
+// Subscribe to event
+add_event_listener('shift_assigned', function($payload) {
+    log_action('SHIFT_ASSIGNED_EVENT', $payload);
+});
+
+// Dispatch event asynchronously (queued in `event_queue` table)
+dispatch_event('shift_assigned', ['user_id' => 42, 'shift_id' => 101], true);
+```
+
+---
+
+## 11. CLI Plugin Management Interface
+
+Administrators and developers can manage plugins directly from the command line using `cron.php`:
+
+```bash
+# List all discovered plugins and their active state
+php cron.php --plugin-list
+
+# Run compatibility inspection on a plugin
+php cron.php --plugin-inspect=oncall-manager
+
+# Activate a plugin
+php cron.php --plugin-activate=oncall-manager
+
+# Deactivate a plugin
+php cron.php --plugin-deactivate=oncall-manager
+
+# Print Portal Framework version
+php cron.php --version
+```
+
+---
+
+## 12. Hook System (Actions, Filters & Hook Unbinding)
+
+### Filters
+```php
+add_filter('theme_nav_links', function ($links) { ... });
+```
+
+### Hook Unbinding
+```php
 remove_action('theme_footer', 'my_custom_footer_callback', 10);
 remove_filter('theme_nav_links', 'my_custom_nav_filter', 10);
 ```
 
 ---
 
-## 8. Extensible Route Handlers & Views
+## 13. Extensible Route Handlers & Views
 
 ```php
 add_action('register_routes', function() {
     register_route('my_plugin_dashboard', function() {
-        if (!has_permission('my_plugin_view_stats')) {
-            die('Access Denied');
-        }
-
         require_once __DIR__ . '/views/dashboard-view.php';
     });
 });
@@ -243,130 +265,58 @@ add_action('register_routes', function() {
 
 ---
 
-## 9. Dynamic Navigation Menus
+## 14. Dynamic Navigation Menus
 
 Plugins can register simple links, top-level menus with children, or attach individual nested sub-menu items dynamically using the `parent` attribute in `theme_nav_links`.
 
-If the parent navigation node exists, the nested item is appended to its dropdown menu. If the parent node does not exist, the framework automatically instantiates the parent main menu item. Administrators can rearrange positions, rename labels, or hide links via the **Navigation Manager** (`admin-nav.php`).
+---
+
+## 15. Home Dashboard Widgets
+
+Plugins can render contextual widget cards on the home dashboard (`index.php`).
 
 ---
 
-## 10. Home Dashboard Widgets
-
-Plugins can render contextual widget cards on the home dashboard (`index.php`). The framework passes the authenticated user's context array:
+## 16. Inter-Plugin Exposed Services
 
 ```php
-add_action('index_dashboard_widgets', function($userContext) {
-    ?>
-    <div class="card shadow-sm border-start border-4 border-primary">
-        <div class="card-body">
-            <h6 class="fw-bold">Hello, <?= htmlspecialchars($userContext['display_name']) ?>!</h6>
-            <p class="small text-muted mb-0">Role: <?= implode(', ', $userContext['roles']) ?></p>
-        </div>
-    </div>
-    <?php
-});
+PluginManager::getInstance()->registerService('fetch_sales_report', function($month) { ... }, 'plugin-a');
+$data = PluginManager::getInstance()->callService('fetch_sales_report', 'October');
 ```
 
 ---
 
-## 11. Inter-Plugin Exposed Services
+## 17. Dynamic Permission & Role Loading
 
-```php
-// Register service in Plugin A
-PluginManager::getInstance()->registerService(
-    'fetch_sales_report',
-    function($month) {
-        return ['month' => $month, 'sales' => 14000];
-    },
-    'plugin-a'
-);
-
-// Call service from Plugin B
-try {
-    $data = PluginManager::getInstance()->callService('fetch_sales_report', 'October');
-    echo "Sales: " . $data['sales'];
-} catch (Exception $e) {
-    echo "Service call failed: " . $e->getMessage();
-}
-```
+When a plugin is activated, `PluginManager` parses the `Permissions:` and `Roles:` headers and provisions DB records safely.
 
 ---
 
-## 12. Dynamic Permission & Role Loading
+## 18. Database Isolation & SQL Prefixing
 
-When a plugin is activated, `PluginManager` parses the `Permissions:` and `Roles:` headers:
-- Permissions listed are automatically registered into the DB permissions directory with the `{plugin_slug}_` prefix.
-- Roles declared (e.g. `Roles: manager:perm1,perm2; operator:perm1`) are created in the roles table and linked to their permissions.
-- On deactivation, dynamic roles and permissions are uninstalled cleanly.
+Plugins MUST use `PluginDatabase.php` for isolated database access inside the `plug_{plugin_slug}_` namespace.
 
 ---
 
-## 13. Database Isolation & SQL Prefixing
-
-Plugins MUST use `PluginDatabase.php` for isolated database access inside the `plug_{plugin_slug}_` namespace:
+## 19. Plugin Settings API
 
 ```php
-require_once __DIR__ . '/../../PluginDatabase.php';
-
-$pdb = new PluginDatabase('my-plugin');
-
-// Create table plug_my_plugin_records
-$pdb->createTable('records', "
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-");
-
-// Query isolated schema
-$tb = $pdb->getTableName('records');
-$pdb->query("INSERT INTO {$tb} (title) VALUES (?)", ['Item 1']);
-$rows = $pdb->query("SELECT * FROM {$tb}")->fetchAll();
-```
-
----
-
-## 14. Plugin Settings API
-
-Plugins can store and retrieve isolated settings using standard helper functions:
-
-```php
-// Save setting 'api_key' for plugin 'my-plugin'
 set_plugin_setting('my-plugin', 'api_key', 'SECRET_123');
-
-// Get setting 'api_key'
 $apiKey = get_plugin_setting('my-plugin', 'api_key', 'default_value');
 ```
 
 ---
 
-## 15. Task Scheduler API
-
-Register background jobs executing at interval or fixed weekly schedules:
+## 20. Task Scheduler API
 
 ```php
 add_action('init_scheduler', function($scheduler) {
-    $scheduler->registerTask(
-        'sync_data',                // Task key
-        'my_plugin_sync_task',      // Callback function name
-        3600,                       // Interval in seconds
-        'my-plugin'                 // Plugin slug
-    );
+    $scheduler->registerTask('sync_data', 'my_plugin_sync_task', 3600, 'my-plugin');
 });
-
-function my_plugin_sync_task() {
-    log_action('MY_PLUGIN_SYNC_COMPLETE', []);
-}
 ```
 
 ---
 
-## 16. Verbose Plugin Compatibility Inspector
+## 21. Verbose Plugin Compatibility Inspector
 
-Administrators can click **Check Compatibility** in `admin-plugins.php` before activating a plugin. The inspector dry-runs diagnostic checks:
-- PHP file syntax validation (with fallback token parser)
-- Entry file and directory structure inspection
-- `Requires PHP:`, `Requires Core:`, and `Requires Plugins:` dependency verification
-- Permission and role namespace collision detection
-- SQL schema statement prefixing verification (`plug_{plugin_slug}_*`)
-- Full report of expected changes (tables created, permissions registered, roles provisioned)
+Administrators can click **Check Compatibility** in `admin-plugins.php` before activating a plugin.
