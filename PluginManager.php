@@ -1257,7 +1257,9 @@ class PluginManager
                 $stmt->execute([$slug]);
             }
 
-            $db->commit();
+            if ($db->inTransaction()) {
+                $db->commit();
+            }
             $this->activePlugins[] = $slug;
 
             // Load file BEFORE triggers
@@ -1271,7 +1273,9 @@ class PluginManager
             $this->doAction("plugin_activate_{$slug}");
             return true;
         } catch (Exception $e) {
-            $db->rollBack();
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
             error_log("Failed to activate plugin {$slug}: " . $e->getMessage());
             global $err;
             $err = $e->getMessage();
@@ -1346,7 +1350,9 @@ class PluginManager
             $stmt = $db->prepare("DELETE FROM active_plugins WHERE plugin_slug = ?");
             $stmt->execute([$slug]);
 
-            $db->commit();
+            if ($db->inTransaction()) {
+                $db->commit();
+            }
 
             // Load file
             if (file_exists($pluginFile)) {
@@ -1366,7 +1372,9 @@ class PluginManager
 
             return true;
         } catch (Exception $e) {
-            $db->rollBack();
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
             error_log("Failed to deactivate plugin {$slug}: " . $e->getMessage());
             return false;
         }

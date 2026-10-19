@@ -84,11 +84,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $db->commit();
+                if ($db->inTransaction()) {
+                    $db->commit();
+                }
                 $msg = "User privileges updated successfully!";
                 log_action('ADMIN_UPDATE_USER_PRIVILEGES', ['user_id' => $target_user_id]);
             } catch (Exception $e) {
-                $db->rollBack();
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
                 $err = "Failed to update user privileges: " . $e->getMessage();
             }
         }

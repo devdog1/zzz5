@@ -275,9 +275,11 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                         echo '</li>';
                     } else {
                         // Render standard Top-Level navigation node
-                        $active_class = (isset($_GET['route']) && $_GET['route'] === $link['route']) ? 'active' : '';
+                        $link_route = $link['route'] ?? '';
+                        $active_class = (isset($_GET['route']) && $link_route !== '' && $_GET['route'] === $link_route) ? 'active' : '';
+                        $href = $link_route !== '' ? 'index.php?route=' . urlencode($link_route) : '#';
                         echo '<li class="nav-item">';
-                        echo '<a class="nav-link ' . $active_class . '" href="index.php?route=' . urlencode($link['route']) . '">';
+                        echo '<a class="nav-link ' . $active_class . '" href="' . $href . '">';
                         if (isset($link['icon'])) {
                             echo '<i class="' . htmlspecialchars($link['icon']) . ' me-1"></i> ';
                         }

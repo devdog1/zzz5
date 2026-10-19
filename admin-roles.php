@@ -80,11 +80,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $db->commit();
+                if ($db->inTransaction()) {
+                    $db->commit();
+                }
                 $msg = "Role configuration updated successfully!";
                 log_action('ADMIN_UPDATE_ROLE', ['role_id' => $role_id, 'is_active' => $is_active]);
             } catch (Exception $e) {
-                $db->rollBack();
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
                 $err = "Failed to update role: " . $e->getMessage();
             }
         }
