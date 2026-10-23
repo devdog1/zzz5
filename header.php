@@ -261,12 +261,14 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                         echo '<ul class="dropdown-menu">';
 
                         foreach ($visible_children as $child) {
+                            $child_route = $child['route'] ?? '';
+                            $child_href = $child_route !== '' ? 'index.php?route=' . urlencode($child_route) : '#';
                             echo '<li>';
-                            echo '<a class="dropdown-item" href="index.php?route=' . urlencode($child['route']) . '">';
+                            echo '<a class="dropdown-item" href="' . $child_href . '">';
                             if (isset($child['icon'])) {
                                 echo '<i class="' . htmlspecialchars($child['icon']) . ' me-2 text-secondary"></i> ';
                             }
-                            echo htmlspecialchars($child['label']);
+                            echo htmlspecialchars($child['label'] ?? '');
                             echo '</a>';
                             echo '</li>';
                         }
@@ -275,9 +277,11 @@ $is_admin_user = has_role('admin') || has_permission('manage_plugins') || has_pe
                         echo '</li>';
                     } else {
                         // Render standard Top-Level navigation node
-                        $active_class = (isset($_GET['route']) && $_GET['route'] === $link['route']) ? 'active' : '';
+                        $link_route = $link['route'] ?? '';
+                        $active_class = (isset($_GET['route']) && $link_route !== '' && $_GET['route'] === $link_route) ? 'active' : '';
+                        $href = $link_route !== '' ? 'index.php?route=' . urlencode($link_route) : '#';
                         echo '<li class="nav-item">';
-                        echo '<a class="nav-link ' . $active_class . '" href="index.php?route=' . urlencode($link['route']) . '">';
+                        echo '<a class="nav-link ' . $active_class . '" href="' . $href . '">';
                         if (isset($link['icon'])) {
                             echo '<i class="' . htmlspecialchars($link['icon']) . ' me-1"></i> ';
                         }
